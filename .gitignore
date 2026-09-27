@@ -1,0 +1,22 @@
+# 의존성
+/node_modules
+
+# next.js 빌드 결과
+/.next/
+/out/
+
+# 테스트
+/coverage
+
+# 비밀값 — API 키는 절대 커밋하지 않는다. 자리 표시용 예시(.env.example)만 예외.
+.env*.local
+.env
+!.env.example
+
+# 기타
+.DS_Store
+*.pem
+npm-debug.log*
+.vercel
+*.tsbuildinfo
+next-env.d.ts
