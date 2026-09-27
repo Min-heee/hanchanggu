@@ -3,8 +3,8 @@
  *
  *   npm run eval:retrieval
  *
- * - 질의: 직원 질문은 그대로, 문의 문항은 가림(maskPii) → queryFromInquiry(날짜·폼 칸 이름 제거) 뒤의 텍스트.
- *   record-demo.ts가 초안을 만들 때 쓰는 질의와 같다.
+ * - 질의·순서: core/retrieve.ts 하나로 잰다. 화면과 record-demo.ts가 초안을 만들 때 쓰는 검색과 같다
+ *   (문의는 가림 → 날짜·폼 칸 이름 제거 → 경과일 구간 문단 앞세우기, 직원 질문은 그대로).
  * - 정답: expectedDocs 중 하나라도 상위 5개 안에 들면 적중. 문단 기준(상위 5개 문단)과 문서 기준(상위 5개 문서)을 함께 적는다.
  * - 인계가 정답인 문항(mustHandover)은 초안을 만들지 않으므로 검색을 하지 않는다. 그래서 따로 적는다.
  */
@@ -13,7 +13,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildKnowledge } from "../src/core/knowledge";
 import { maskPii } from "../src/core/mask";
-import { queryFromInquiry, search } from "../src/core/search";
+import { readPostopDay } from "../src/core/postop";
+import { retrieve } from "../src/core/retrieve";
 import { loadVault } from "../src/core/vault";
 import { readVaultDir } from "../src/server/vault-files";
 
@@ -38,8 +39,11 @@ const inquiries = new Map<string, { text: string }>(
 const golden = (JSON.parse(readFileSync(join(ROOT, "data/golden.json"), "utf8")) as Golden[]).filter((g) => g.expectedDocs.length > 0);
 
 const rows = golden.map((g) => {
-  const query = g.kind === "staff-qa" ? g.question! : queryFromInquiry(maskPii(inquiries.get(g.inquiryId!)!.text).masked);
-  const hits = search(k.index, query, 1000).hits;
+  const raw = g.kind === "staff-qa" ? g.question! : inquiries.get(g.inquiryId!)!.text;
+  const hits =
+    g.kind === "staff-qa"
+      ? retrieve(k.index, "staff-qa", raw, null, 1000).hits
+      : retrieve(k.index, "reply", maskPii(raw).masked, readPostopDay(raw)?.days ?? null, 1000).hits;
   const docs: string[] = [];
   for (const h of hits) if (!docs.includes(h.chunk.docId)) docs.push(h.chunk.docId);
   return {

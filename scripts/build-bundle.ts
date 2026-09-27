@@ -1,0 +1,62 @@
+/**
+ * 화면용 번들을 만든다(src/generated/bundle.json). `npm run build`·`dev`·`typecheck` 앞에 자동으로 돈다.
+ *
+ *   npm run bundle                       # 볼트 + 문의 + 골든셋 + (있으면) data/demo-responses.json
+ *   npm run bundle -- --fake-recording   # 녹화 대신 시험용 가짜 녹화(모델 호출 없음)를 넣는다
+ *   DEMO_FAKE_RECORDING=1 npm run dev    # 위와 같음. dev 앞의 자동 번들도 가짜 녹화로 만든다(배포 환경에는 두지 않는다)
+ *
+ * 생성물은 커밋하지 않는다(data/README.md '화면용 번들'). 원본(vault/, data/)과 두 벌이 되면 어긋날 수 있다.
+ * 볼트·데이터·녹화 중 하나라도 읽히지 않으면 번들을 쓰지 않고 멈춘다 — 빈 화면이 배포되지 않게.
+ */
+
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { buildKnowledge } from "../src/core/knowledge";
+import { loadVault } from "../src/core/vault";
+import { buildBundle } from "../src/demo/bundle";
+import { DEMO_AS_OF } from "../src/demo/clock";
+import { buildFakeRecording } from "../src/demo/fake-recording";
+import { readVaultDir } from "../src/server/vault-files";
+
+const ROOT = process.cwd();
+
+async function main() {
+  const fake = process.argv.includes("--fake-recording") || process.env.DEMO_FAKE_RECORDING === "1";
+  const vaultFiles = readVaultDir(join(ROOT, "vault"));
+  const inquiriesJson = JSON.parse(readFileSync(join(ROOT, "data/inquiries.json"), "utf8")) as { id: string; channel: string; text: string }[];
+  const goldenJson = JSON.parse(readFileSync(join(ROOT, "data/golden.json"), "utf8")) as { id: string; kind: "staff-qa" | "inquiry"; question?: string }[];
+
+  let recordingJson: unknown | null = null;
+  const recPath = join(ROOT, "data/demo-responses.json");
+  if (fake) {
+    const kr = buildKnowledge(loadVault(vaultFiles, { asOf: DEMO_AS_OF }));
+    if (!kr.ok) throw new Error(kr.errors.join("\n"));
+    // JSON으로 한 번 왕복시킨다. 진짜 녹화 파일과 똑같이 '파일에서 읽은 값'으로 검사받게.
+    recordingJson = JSON.parse(JSON.stringify(await buildFakeRecording(kr.knowledge, inquiriesJson, goldenJson, DEMO_AS_OF)));
+  } else if (existsSync(recPath)) {
+    recordingJson = JSON.parse(readFileSync(recPath, "utf8"));
+  }
+
+  const r = buildBundle({
+    asOf: DEMO_AS_OF,
+    vaultFiles,
+    inquiriesJson,
+    goldenJson,
+    recordingJson,
+    recordingSource: fake ? "fake-fixture" : "file",
+  });
+  if (!r.ok) {
+    console.error(`번들을 만들지 못했습니다:\n${r.errors.join("\n")}`);
+    process.exit(1);
+  }
+  mkdirSync(join(ROOT, "src/generated"), { recursive: true });
+  writeFileSync(join(ROOT, "src/generated/bundle.json"), JSON.stringify(r.bundle));
+  const rec = r.bundle.recording ? `녹화 ${r.bundle.recordingSource}(문의 ${r.bundle.recording.inquiries.length}, 질문 ${r.bundle.recording.golden.length})` : "녹화 없음";
+  console.log(`번들: 볼트 ${vaultFiles.length}편, 문의 ${r.bundle.inquiries.length}건, 골든셋 ${r.bundle.golden.length}문항, ${rec}`);
+  for (const w of r.bundle.recordingIssues) console.warn(`경고: ${w}`);
+}
+
+main().catch((e) => {
+  console.error((e as Error).message);
+  process.exit(1);
+});

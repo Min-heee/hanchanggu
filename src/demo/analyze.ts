@@ -1,0 +1,46 @@
+/**
+ * 문의 한 건(또는 '직접 해 보기' 입력)을 브라우저에서 규칙·검색 단계까지 돌린다. 키 없이 돈다.
+ *
+ *   가림(F10) → 게이트(F5) → 경과일(F17) → ① 검색 → ② 발췌
+ *
+ * ③ 생성·④ 검증은 모델이 필요하므로 여기서 하지 않는다. 녹화가 있으면 화면이 녹화를 붙인다.
+ * 녹화 스크립트와 같은 함수(decideRoute, readPostopDay, retrieve, groupHitsByDoc)를 부르므로
+ * 화면에서 본 발췌가 녹화 때 모델이 받은 문단과 같다(볼트가 그 뒤에 바뀌지 않았다면).
+ */
+
+import { groupHitsByDoc, type Knowledge } from "../core/knowledge";
+import { maskPii } from "../core/mask";
+import { readPostopDay, type PostopDayReading } from "../core/postop";
+import { retrieve, type Retrieval } from "../core/retrieve";
+import { decideRoute, type RouteDecision } from "../core/route";
+
+export interface Analysis {
+  decision: RouteDecision;
+  /** 문의에서 읽은 경과일(없으면 null). */
+  postopRead: PostopDayReading | null;
+  /** 검색에 실제로 쓴 경과일: 직원이 고친 값이 있으면 그 값. */
+  postopUsed: number | null;
+  /** 인계·공개 창구·보류면 검색하지 않는다(null). */
+  retrieval: Retrieval | null;
+  excerpts: ReturnType<typeof groupHitsByDoc>;
+}
+
+/** 검색까지 가는 경로. 인계 카드·고정 문구·보류는 초안을 만들지 않으므로 검색도 하지 않는다. */
+const SEARCH_STEPS = new Set(["classify", "draft", "shop-redirect"]);
+
+export function analyzeInquiry(k: Knowledge, channel: string, text: string, postopOverride: number | null | undefined = undefined): Analysis {
+  const decision = decideRoute({ channel, text, channels: k.channels, redflag: k.redflag, medication: k.medication });
+  const postopRead = readPostopDay(text);
+  // undefined = 직원이 고치지 않음, null = 직원이 '경과일 없음'으로 고침.
+  const postopUsed = postopOverride === undefined ? (postopRead?.days ?? null) : postopOverride;
+  if (!SEARCH_STEPS.has(decision.step)) return { decision, postopRead, postopUsed, retrieval: null, excerpts: [] };
+  const retrieval = retrieve(k.index, "reply", decision.mask.masked, postopUsed);
+  return { decision, postopRead, postopUsed, retrieval, excerpts: groupHitsByDoc(retrieval.hits, k.titles) };
+}
+
+/** 사내 Q&A(F14). 직원 질문에는 게이트를 돌리지 않는다(인계할 환자·창구가 없다). 가림은 한다. */
+export function analyzeStaffQuestion(k: Knowledge, question: string) {
+  const mask = maskPii(question);
+  const retrieval = retrieve(k.index, "staff-qa", mask.masked);
+  return { mask, retrieval, excerpts: groupHitsByDoc(retrieval.hits, k.titles) };
+}
