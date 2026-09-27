@@ -6,8 +6,12 @@
  * 코드가 바뀐 뒤 예전 파일이 남아 있으면 화면이 조용히 빈칸을 그린다. 번들을 만들 때 모양을 확인해
  * 틀리면 빌드를 멈춘다.
  *
- * 스키마가 타입보다 좁아지지 않게(쓰는 쪽이 만든 값을 읽는 쪽이 거부하지 않게) 아래 `_writerFits`로
- * 컴파일 때 확인한다. 반대 방향(스키마가 받는데 타입엔 없는 값)은 화면이 읽지 않는 필드뿐이다.
+ * 타입과 스키마가 서로 어긋나지 않게 세 겹으로 막는다.
+ * 1. 스키마는 모두 strictObject다 — 쓰는 쪽이 필드를 더하고 스키마를 안 고치면, 녹화 파일을 읽을 때
+ *    모르는 키로 번들 생성이 멈춘다(z.object였다면 조용히 버려서 화면이 undefined를 받는다).
+ * 2. 아래 `_writerFits`: 쓰는 쪽 값이 스키마 입력으로 들어가는지(스키마가 타입보다 좁지 않은지) tsc가 본다.
+ * 3. 아래 `_sameKeys*`: 타입과 스키마의 키 목록이 같은지 tsc가 본다(필드 추가·삭제 양쪽).
+ * 그리고 recording.test.ts가 가짜 녹화를 JSON 왕복한 값과 parse 결과가 같은지(버려진 키가 없는지) 본다.
  */
 
 import { z } from "zod";
@@ -29,6 +33,8 @@ export interface InquiryRecord {
 export interface GoldenRecord {
   id: string;
   question: string;
+  /** 모델에 보낸 질문(개인정보를 가린 것). 화면의 'AI가 받은 텍스트'는 이 값을 보인다. */
+  maskedQuestion: string;
   retrieval: { chunkId: string; score: number }[];
   excludedMatches: { docId: string; reason: string }[];
   draft: DraftResult;
@@ -47,18 +53,18 @@ export interface DemoRecording {
   golden: GoldenRecord[];
 }
 
-const Retrieval = z.array(z.object({ chunkId: z.string(), score: z.number() }));
-const Excluded = z.array(z.object({ docId: z.string(), reason: z.string() }));
+const Retrieval = z.array(z.strictObject({ chunkId: z.string(), score: z.number() }));
+const Excluded = z.array(z.strictObject({ docId: z.string(), reason: z.string() }));
 
-const Citation = z.object({ docId: z.string(), chunkIds: z.array(z.string()), citedText: z.string() });
+const Citation = z.strictObject({ docId: z.string(), chunkIds: z.array(z.string()), citedText: z.string() });
 
-export const DraftSchema = z.object({
+export const DraftSchema = z.strictObject({
   status: z.enum(["ok", "hold"]),
-  holdReasons: z.array(z.object({ code: z.string(), detail: z.string() })),
+  holdReasons: z.array(z.strictObject({ code: z.string(), detail: z.string() })),
   modelText: z.string(),
   finalText: z.string().nullable(),
   sentences: z.array(
-    z.object({
+    z.strictObject({
       index: z.number(),
       text: z.string(),
       start: z.number(),
@@ -68,12 +74,12 @@ export const DraftSchema = z.object({
       problems: z.array(z.string()),
     }),
   ),
-  fills: z.array(z.object({ placeholder: z.string(), value: z.string(), sourceDoc: z.enum(["V03", "V02"]), key: z.string().nullable() })),
+  fills: z.array(z.strictObject({ placeholder: z.string(), value: z.string(), sourceDoc: z.enum(["V03", "V02"]), key: z.string().nullable() })),
   adcheck: z
     .object({
       level: z.enum(["banned", "warn", "clean"]),
       hits: z.array(
-        z.object({
+        z.strictObject({
           level: z.enum(["banned", "warn"]),
           term: z.string(),
           reason: z.string().nullable(),
@@ -84,35 +90,35 @@ export const DraftSchema = z.object({
       ),
     })
     .nullable(),
-  documents: z.array(z.object({ docId: z.string(), kind: z.enum(["content", "text"]), blocks: z.array(z.object({ chunkId: z.string(), text: z.string() })) })),
-  meta: z.object({ model: z.string().nullable(), servedByFallback: z.boolean(), stopReason: z.string().nullable(), usage: z.unknown() }),
+  documents: z.array(z.strictObject({ docId: z.string(), kind: z.enum(["content", "text"]), blocks: z.array(z.strictObject({ chunkId: z.string(), text: z.string() })) })),
+  meta: z.strictObject({ model: z.string().nullable(), servedByFallback: z.boolean(), stopReason: z.string().nullable(), usage: z.unknown() }),
 });
 
 const ClassificationSchema = z.union([
-  z.object({
+  z.strictObject({
     status: z.literal("classified"),
-    classification: z.object({ category: z.string(), priority: z.string(), handover: z.boolean(), evidence: z.array(z.string()), reason: z.string() }),
+    classification: z.strictObject({ category: z.string(), priority: z.string(), handover: z.boolean(), evidence: z.array(z.string()), reason: z.string() }),
     evidence: z.array(z.string()),
     droppedEvidence: z.array(z.string()),
     model: z.string(),
     servedByFallback: z.boolean(),
     usage: z.unknown(),
   }),
-  z.object({ status: z.literal("unclassified"), reason: z.string(), model: z.string().nullable() }),
+  z.strictObject({ status: z.literal("unclassified"), reason: z.string(), model: z.string().nullable() }),
 ]);
 
-export const DemoRecordingSchema = z.object({
+export const DemoRecordingSchema = z.strictObject({
   fictional: z.literal(true),
   note: z.string(),
   requestedModel: z.string(),
   servedModels: z.array(z.string()),
   vaultAsOf: z.string(),
   generatedAt: z.string(),
-  totalUsage: z.object({ input_tokens: z.number(), output_tokens: z.number() }),
+  totalUsage: z.strictObject({ input_tokens: z.number(), output_tokens: z.number() }),
   inquiries: z.array(
-    z.object({
+    z.strictObject({
       id: z.string(),
-      route: z.object({
+      route: z.strictObject({
         step: z.enum(["handover", "public-template", "shop-redirect", "classify", "draft", "hold"]),
         trace: z.array(z.string()),
         holdReason: z.string().nullable(),
@@ -126,12 +132,23 @@ export const DemoRecordingSchema = z.object({
       draft: DraftSchema.nullable(),
     }),
   ),
-  golden: z.array(z.object({ id: z.string(), question: z.string(), retrieval: Retrieval, excludedMatches: Excluded, draft: DraftSchema })),
+  golden: z.array(
+    z.strictObject({ id: z.string(), question: z.string(), maskedQuestion: z.string(), retrieval: Retrieval, excludedMatches: Excluded, draft: DraftSchema }),
+  ),
 });
 
-// 컴파일 때 확인: 쓰는 쪽 타입(DemoRecording)의 값은 모두 스키마 입력으로 들어갈 수 있어야 한다.
-// 타입을 바꾸고 스키마를 안 바꾸면 여기서 tsc가 멈춘다.
+// 컴파일 때 확인 ①: 쓰는 쪽 타입(DemoRecording)의 값은 모두 스키마 입력으로 들어갈 수 있어야 한다(스키마가 좁으면 멈춤).
 export const _writerFits = (r: DemoRecording): z.input<typeof DemoRecordingSchema> => r;
+
+// 컴파일 때 확인 ②: 키 목록이 양쪽으로 같아야 한다. 타입에 필드를 더하고 스키마를 안 고치면(또는 반대) 여기서 멈춘다.
+type SameKeys<A, B> = [Exclude<keyof A, keyof B>, Exclude<keyof B, keyof A>] extends [never, never] ? true : false;
+type Out = z.output<typeof DemoRecordingSchema>;
+export const _sameKeysRecording: SameKeys<DemoRecording, Out> = true;
+export const _sameKeysInquiry: SameKeys<InquiryRecord, Out["inquiries"][number]> = true;
+export const _sameKeysRoute: SameKeys<InquiryRecord["route"], Out["inquiries"][number]["route"]> = true;
+export const _sameKeysGolden: SameKeys<GoldenRecord, Out["golden"][number]> = true;
+export const _sameKeysDraft: SameKeys<DraftResult, z.output<typeof DraftSchema>> = true;
+export const _sameKeysSentence: SameKeys<DraftResult["sentences"][number], z.output<typeof DraftSchema>["sentences"][number]> = true;
 
 export type RecordingParse = { ok: true; value: DemoRecording } | { ok: false; errors: string[] };
 
@@ -145,23 +162,4 @@ export function parseDemoRecording(json: unknown): RecordingParse {
   return { ok: true, value: r.data as unknown as DemoRecording };
 }
 
-/**
- * 녹화와 지금 볼트가 어긋난 곳을 찾는다. 녹화 뒤에 볼트 문단을 고치면, 화면의 인용 번호를 눌렀을 때
- * 칠해지는 문단이 모델이 실제로 받은 문단과 달라진다. 빌드를 멈추지는 않고 화면에 경고로 보인다.
- */
-export function recordingDrift(rec: DemoRecording, chunkText: ReadonlyMap<string, string>): string[] {
-  const issues: string[] = [];
-  const check = (owner: string, draft: DraftResult | null) => {
-    if (!draft) return;
-    for (const d of draft.documents) {
-      for (const b of d.blocks) {
-        const now = chunkText.get(b.chunkId);
-        if (now === undefined) issues.push(`${owner}: 녹화에 쓴 문단 ${b.chunkId}가 지금 볼트에 없습니다`);
-        else if (now !== b.text) issues.push(`${owner}: 문단 ${b.chunkId}가 녹화 뒤에 바뀌었습니다`);
-      }
-    }
-  };
-  for (const r of rec.inquiries) check(r.id, r.draft);
-  for (const g of rec.golden) check(g.id, g.draft);
-  return issues;
-}
+// 녹화와 지금 코드·데이터의 어긋남 검사는 src/demo/drift.ts(검색·가림 코어가 필요해서 형식 파일과 뗐다).

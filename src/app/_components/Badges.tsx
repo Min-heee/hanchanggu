@@ -1,12 +1,21 @@
 /**
  * 배지. 색만으로 상태를 구분하지 않도록 언제나 글자 라벨을 함께 쓴다.
+ * 배지는 짧은 라벨에만 쓴다(줄바꿈이 안 된다). 문장형 안내는 .note 상자로.
  */
 
 import type { ReplyMode } from "@/core/route";
 import { KIND_LABEL, STATUS_LABEL, type InboxKind, type InboxStatus } from "@/demo/inbox";
 import { channelLabel } from "../_lib/data";
 
-const STATUS_COLOR: Record<InboxStatus, string> = { new: "blue", draft: "green", handover: "red", hold: "gray", sent: "gray" };
+const STATUS_COLOR: Record<InboxStatus, string> = {
+  new: "blue",
+  template: "blue",
+  draft: "green",
+  "handover-needed": "red",
+  "handed-over": "gray",
+  hold: "gray",
+  sent: "gray",
+};
 const KIND_COLOR: Partial<Record<InboxKind, string>> = { redflag: "red", medication: "red", "llm-handover": "red", deposit: "orange" };
 
 export const REPLY_MODE_LABEL: Record<ReplyMode, string> = {
@@ -26,16 +35,4 @@ export function StatusBadge({ status }: { status: InboxStatus }) {
 
 export function KindBadge({ kind }: { kind: InboxKind }) {
   return <span className={`badge ${KIND_COLOR[kind] ?? "gray"}`}>{KIND_LABEL[kind]}</span>;
-}
-
-export function StepTitle({ n, children }: { n: string; children: React.ReactNode }) {
-  return (
-    <h2 className="step-title">
-      <span className="step-num" aria-hidden="true">
-        {n}
-      </span>
-      <span className="sr-only">{n}단계 </span>
-      {children}
-    </h2>
-  );
 }

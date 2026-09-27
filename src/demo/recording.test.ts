@@ -4,13 +4,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildBundle } from "./bundle";
+import { buildBundle, recordingGuard } from "./bundle";
+import { recordingDrift } from "./drift";
 import { DEMO_AS_OF, DEMO_NOW_MS } from "./clock";
 import { computeMetrics } from "./evaluation";
 import { buildFakeRecording, FAKE_MODEL } from "./fake-recording";
 import { buildInboxItem, sortInbox } from "./inbox";
 import { readConfirmPolicy, readHandoverPolicy } from "./policy";
-import { parseDemoRecording, recordingDrift, type DemoRecording } from "./recording";
+import { parseDemoRecording, type DemoRecording } from "./recording";
 import { realBundle, realInputs, realKnowledge } from "./__fixtures__/real";
 
 const k = realKnowledge();
@@ -62,6 +63,41 @@ describe("가짜 녹화 → 녹화 형식 파서", () => {
     expect([g32.status, g32.holdReasons.map((h) => h.code)]).toEqual(["hold", ["no-evidence"]]);
   });
 
+  it("근거가 약하면(PRD F7) 모델을 부르지 않고 보류로 기록한다", async () => {
+    const r = parseDemoRecording(await fakeJson());
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    for (const id of ["G34", "G36", "G38"]) {
+      const d = r.value.golden.find((g) => g.id === id)!.draft;
+      expect([id, d.status, d.holdReasons.map((h) => h.code), d.meta.model, d.documents]).toEqual([id, "hold", ["weak-retrieval"], null, []]);
+    }
+    // 대본 질문(G16)은 근거가 있어 모델을 부른다.
+    expect(r.value.golden.find((g) => g.id === "G16")!.draft.meta.model).toBe(FAKE_MODEL);
+  });
+
+  it("사내 Q&A 녹화는 모델에 보낸 가린 질문을 남긴다", async () => {
+    const r = parseDemoRecording(await fakeJson());
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const g16 = r.value.golden.find((g) => g.id === "G16")!;
+    expect(g16.maskedQuestion).toBe(g16.question);
+  });
+
+  it("parse 결과는 파일에서 읽은 값과 같다 — 스키마가 조용히 버리는 키가 없다", async () => {
+    const json = await fakeJson();
+    const r = parseDemoRecording(json);
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    expect(r.value).toEqual(json);
+  });
+
+  it("쓰는 쪽이 스키마에 없는 필드를 더하면 읽기가 멈춘다(strict)", async () => {
+    const json = (await fakeJson()) as DemoRecording;
+    const withExtra = { ...json, inquiries: [{ ...json.inquiries[0], maskVersion: "v2" }, ...json.inquiries.slice(1)] };
+    const r = parseDemoRecording(withExtra);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.startsWith("inquiries.0"))).toBe(true);
+    const draftExtra = { ...json, golden: [{ ...json.golden[0], draft: { ...json.golden[0].draft, intent: "confirm" } }, ...json.golden.slice(1)] };
+    expect(parseDemoRecording(draftExtra).ok).toBe(false);
+  });
+
   it("모양이 틀리면 어느 경로가 틀렸는지 알려 준다", async () => {
     const bad = (await fakeJson()) as DemoRecording;
     const broken = { ...bad, inquiries: [{ ...bad.inquiries[0], route: { step: "뭔가" } }] };
@@ -72,17 +108,78 @@ describe("가짜 녹화 → 녹화 형식 파서", () => {
     expect(parseDemoRecording({ fictional: false }).ok).toBe(false);
   });
 
-  it("녹화 뒤에 볼트 문단이 바뀌면 경고한다", async () => {
+});
+
+describe("녹화와 지금 코드·데이터의 어긋남(drift)", () => {
+  it("녹화 직후에는 어긋남이 없다", async () => {
+    const b = realBundle(await fakeJson(), "fake-fixture");
+    expect(b.recordingIssues).toEqual([]);
+  });
+
+  it("녹화 뒤 볼트에 답 문단을 더하면(주차 정산) 그 문의의 ①이 바뀐 것을 잡는다", async () => {
+    const json = await fakeJson();
+    const vaultFiles = inputs.vaultFiles.map((f) =>
+      f.path === "hours-location.md"
+        ? { ...f, raw: f.raw.replace("## 기계가 읽는 값", "## 주차 정산\n\n주차는 2시간 무료이고 정산은 1층 안내 데스크에서 합니다.\n\n## 기계가 읽는 값") }
+        : f,
+    );
+    const r = buildBundle({ ...inputs, vaultFiles, recordingJson: json, recordingSource: "fake-fixture" });
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const q18 = r.bundle.recordingIssues.filter((i) => i.target === "Q18").map((i) => i.message);
+    expect(q18).toContain("문서 찾기(①) 결과가 그때와 다릅니다");
+  });
+
+  it("문의 원문을 고치면 AI가 받은 글이 다르다고 잡는다", async () => {
+    const json = await fakeJson();
+    const qs = (inputs.inquiriesJson as { id: string; text: string }[]).map((q) => (q.id === "Q02" ? { ...q, text: "수술 후 머리는 언제 감아요?" } : q));
+    const r = buildBundle({ ...inputs, inquiriesJson: qs, recordingJson: json, recordingSource: "fake-fixture" });
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const q02 = r.bundle.recordingIssues.filter((i) => i.target === "Q02").map((i) => i.message);
+    expect(q02).toContain("AI가 받은 글(문의 원문 또는 개인정보 가림 결과)이 지금과 다릅니다");
+  });
+
+  it("초안이 쓴 문단이 바뀌거나 사라지면 잡는다", async () => {
     const r = parseDemoRecording(await fakeJson());
     if (!r.ok) throw new Error(r.errors.join("\n"));
-    const text = new Map(k.chunks.map((c) => [c.chunkId, c.text]));
-    expect(recordingDrift(r.value, text)).toEqual([]);
-    text.set("V03#1", "바뀐 문단");
-    expect(recordingDrift(r.value, text).some((w) => w.includes("V03#1"))).toBe(true);
+    const chunks = k.chunks.map((c) => (c.chunkId === "V03#2" ? { ...c, text: "바뀐 문단" } : c));
+    const issues = recordingDrift(r.value, { ...k, chunks }, inquiries, golden);
+    expect(issues.some((i) => i.target === "Q02" && i.message.includes("V03#2"))).toBe(true);
+  });
+
+  it("녹화의 볼트 기준일이 시연 기준일과 다르면 번들을 만들지 않는다", async () => {
+    const json = { ...((await fakeJson()) as DemoRecording), vaultAsOf: "2026-09-28" };
+    const r = buildBundle({ ...inputs, recordingJson: json });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.includes("기준일"))).toBe(true);
+  });
+});
+
+describe("배포 빌드의 녹화 확인(recordingGuard)", () => {
+  const base = { fakeRequested: false, hasRecordingFile: true, forBuild: false, vercel: undefined, vercelEnv: undefined, ci: undefined };
+  it.each([
+    ["로컬 개발, 녹화 없음", { hasRecordingFile: false }, true],
+    ["로컬 빌드, 녹화 없음", { hasRecordingFile: false, forBuild: true }, true],
+    ["Vercel 미리 보기, 녹화 없음", { hasRecordingFile: false, vercel: "1", vercelEnv: "preview" }, true],
+    ["Vercel 공개 배포, 녹화 없음", { hasRecordingFile: false, vercel: "1", vercelEnv: "production" }, false],
+    ["CI, 녹화 없음", { hasRecordingFile: false, ci: "true" }, false],
+    ["Vercel 공개 배포, 녹화 있음", { vercel: "1", vercelEnv: "production" }, true],
+    ["가짜 녹화 + npm run dev", { fakeRequested: true }, true],
+    ["가짜 녹화 + npm run build", { fakeRequested: true, forBuild: true }, false],
+    ["가짜 녹화 + Vercel 미리 보기", { fakeRequested: true, vercel: "1", vercelEnv: "preview" }, false],
+    ["가짜 녹화 + CI", { fakeRequested: true, ci: "1" }, false],
+  ] as const)("%s → 통과 %s", (_, env, ok) => {
+    expect(recordingGuard({ ...base, ...env }).ok).toBe(ok);
   });
 });
 
 describe("번들 생성", () => {
+  it("공개 번들에는 화면이 읽지 않는 라벨 설명(notes)을 싣지 않는다", () => {
+    const b = realBundle();
+    expect(b.inquiries.every((q) => !("notes" in q.labels))).toBe(true);
+    expect(b.golden.every((g) => !("notes" in g))).toBe(true);
+    expect(JSON.stringify(b)).not.toContain("실제 병원 공개 후기");
+  });
+
   it("녹화 파일이 없으면 recording null, 있으면 형식을 확인해 넣는다", async () => {
     expect(realBundle().recording).toBeNull();
     expect(realBundle().recordingSource).toBe("none");

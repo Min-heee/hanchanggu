@@ -45,7 +45,7 @@ export interface DraftInput {
   ad: AdConfig | null;
 }
 
-export type DraftHoldCode = HoldCode | "no-sources" | "refusal" | "truncated" | "template" | "ad-banned" | "api-error";
+export type DraftHoldCode = HoldCode | "no-sources" | "weak-retrieval" | "refusal" | "truncated" | "template" | "ad-banned" | "api-error";
 
 export interface DraftResult {
   status: "ok" | "hold";
@@ -101,6 +101,14 @@ export function buildDocuments(sources: DraftSource[]): { blocks: Anthropic.Beta
 export { finalTextBlocks };
 
 const emptyMeta = { model: null, servedByFallback: false, stopReason: null, usage: null };
+
+/**
+ * 모델을 부르기 전에 보류한 초안. 검색 점수가 기준 미만(PRD F7)일 때 녹화가 이 모양을 남긴다 —
+ * 모델을 부른 보류와 같은 DraftResult라 화면·평가가 따로 갈라 읽지 않아도 된다.
+ */
+export function holdBeforeModel(code: DraftHoldCode, detail: string): DraftResult {
+  return { status: "hold", holdReasons: [{ code, detail }], modelText: "", finalText: null, sentences: [], fills: [], adcheck: null, documents: [], meta: emptyMeta };
+}
 
 export async function generateDraft(client: ClaudeClient, input: DraftInput): Promise<DraftResult> {
   const { blocks, documents } = buildDocuments(input.sources);

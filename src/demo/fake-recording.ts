@@ -7,7 +7,7 @@
  * 모의 클라이언트의 답은 받은 문단을 글자 그대로 옮긴 문장이라 내용 품질을 보여 주지 않는다.
  * 화면은 recordingSource가 "fake-fixture"면 "시험용 가짜 녹화"라고 크게 표시한다.
  *
- *   npm run bundle -- --fake-recording     # 가짜 녹화를 넣은 번들로 화면 보기(커밋하지 않는 생성물)
+ *   DEMO_FAKE_RECORDING=1 npm run dev     # 가짜 녹화를 넣은 번들로 화면 보기(배포·빌드에서는 거부된다)
  */
 
 import type Anthropic from "@anthropic-ai/sdk";

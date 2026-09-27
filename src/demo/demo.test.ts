@@ -4,12 +4,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { retrieve } from "../core/retrieve";
+import { MIN_TOP_SCORE, retrieve } from "../core/retrieve";
 import { readPostopDay } from "../core/postop";
 import { analyzeInquiry, analyzeStaffQuestion } from "./analyze";
 import { DEMO_NOW, DEMO_NOW_MS, formatDuration, formatKst, kstParts, kstToMs } from "./clock";
-import { computeMetrics } from "./evaluation";
-import { buildInboxItem, filterInbox, filterOptions, sortInbox, type LocalMarks } from "./inbox";
+import { computeMetrics, metricValue } from "./evaluation";
+import { buildInboxItem, deadlineBadge, filterInbox, filterOptions, inboxRows, inboxSummary, KIND_LABEL, sortInbox, STATUS_LABEL, type LocalMarks } from "./inbox";
 import { confirmDeadlineMs, FALLBACK_CONFIRM_BUSINESS_DAYS, isOpenAt, readConfirmPolicy, readHandoverPolicy } from "./policy";
 import { realBundle, realKnowledge } from "./__fixtures__/real";
 
@@ -96,25 +96,34 @@ describe("규정 읽기(볼트 V04·V12·V02)", () => {
 });
 
 describe("통합 목록(F3) — 녹화 없음", () => {
-  it("적신호 인계 → 예약금 확정 대기 → 기다린 시간 순", () => {
+  it("적신호 인계 → 약·분류 인계 → 예약금 확정 대기 → 기다린 시간 순", () => {
     expect(items().map((i) => i.id)).toEqual([
       // 적신호(규칙 RF-*) 16건, 받은 순 = 오래 기다린 순. Q24는 과잉 인계(부정문)라 여기 있다.
       ...["Q06", "Q07", "Q08", "Q09", "Q11", "Q13", "Q14", "Q16", "Q19", "Q22", "Q24", "Q26", "Q27", "Q32", "Q35", "Q36"],
+      // 약 문의 인계(MED-01). 5분 시한의 인계라 주차·리뷰 문의 아래에 묻히면 안 된다.
+      "Q25",
       // 예약금 받음·미확정
       ...["Q01", "Q15", "Q31"],
-      ...["Q02", "Q03", "Q04", "Q05", "Q10", "Q12", "Q17", "Q18", "Q20", "Q21", "Q23", "Q25", "Q28", "Q29", "Q30", "Q33", "Q34", "Q37", "Q38", "Q39", "Q40"],
+      ...["Q02", "Q03", "Q04", "Q05", "Q10", "Q12", "Q17", "Q18", "Q20", "Q21", "Q23", "Q28", "Q29", "Q30", "Q33", "Q34", "Q37", "Q38", "Q39", "Q40"],
     ]);
+    expect(items().find((i) => i.id === "Q25")!.group).toBe(1);
   });
 
-  it("상태: 규칙 인계는 '인계', 공개 창구는 '초안'(고정 문구), 나머지는 녹화 전이라 '새 문의'", () => {
+  it("상태: 인계는 '인계 필요'→표시하면 '인계함', 공개 창구는 '고정 문구 고르기'→고르면 '초안', 초안 경로는 AI 답 전이라 '새 문의'", () => {
     const by = new Map(items().map((i) => [i.id, i]));
-    expect(by.get("Q06")!.status).toBe("handover");
-    expect(by.get("Q25")!.status).toBe("handover");
+    expect(by.get("Q06")!.status).toBe("handover-needed");
+    expect(by.get("Q25")!.status).toBe("handover-needed");
     expect(by.get("Q25")!.kind).toBe("medication");
-    expect(by.get("Q04")!.status).toBe("draft");
+    expect(by.get("Q04")!.status).toBe("template");
     expect(by.get("Q04")!.kind).toBe("public");
     expect(by.get("Q02")!.status).toBe("new");
+    expect(by.get("Q02")!.kind).toBe("draft-path");
     expect(by.get("Q01")!.kind).toBe("deposit");
+    const marked = new Map(items({ sent: new Set(), handedOver: new Map([["Q06", DEMO_NOW_MS]]), templateChosen: new Set(["Q04"]) }).map((i) => [i.id, i]));
+    expect(marked.get("Q06")!.status).toBe("handed-over");
+    expect(marked.get("Q04")!.status).toBe("draft");
+    expect(KIND_LABEL["draft-path"]).toBe("일반 문의");
+    expect(STATUS_LABEL["handover-needed"]).toBe("인계 필요");
   });
 
   it("모의 발송한 건은 맨 아래로", () => {
@@ -154,7 +163,41 @@ describe("통합 목록(F3) — 녹화 없음", () => {
     expect(new Set(opts.channels)).toEqual(new Set(["kakao", "naver_talktalk", "instagram_dm", "web_form", "landing_form", "booking_note", "phone_memo", "sms", "review", "youtube_comment"]));
     expect(filterInbox(all, { channel: "booking_note", kind: null, status: null }).map((i) => i.id)).toEqual(["Q27", "Q01", "Q15", "Q31"]);
     expect(filterInbox(all, { channel: "booking_note", kind: "deposit", status: null }).map((i) => i.id)).toEqual(["Q01", "Q15", "Q31"]);
-    expect(filterInbox(all, { channel: null, kind: null, status: "handover" })).toHaveLength(17);
+    expect(filterInbox(all, { channel: null, kind: null, status: "handover-needed" })).toHaveLength(17);
+  });
+
+  it("시한 배지는 넘긴 양까지 적는다(행끼리 구분되게)", () => {
+    const by = new Map(items().map((i) => [i.id, i]));
+    // Q06: 토 21:14 받음 → 21:19 시한 → 월 10:00 = 1일 12시간 41분 지남(하루가 넘으면 분은 버림).
+    expect(deadlineBadge(by.get("Q06")!, DEMO_NOW_MS)).toEqual({ tone: "red", text: "인계 시한 1일 12시간 지남" });
+    expect(deadlineBadge(by.get("Q01")!, DEMO_NOW_MS)).toEqual({ tone: "orange", text: "예약금 받음 · 확정 연락 9시간 남음" });
+    expect(deadlineBadge(by.get("Q02")!, DEMO_NOW_MS)).toBeNull();
+    const texts = items()
+      .filter((i) => i.group === 0)
+      .map((i) => deadlineBadge(i, DEMO_NOW_MS)!.text);
+    expect(new Set(texts).size).toBeGreaterThan(8);
+  });
+
+  it("요약: 적신호 16(시한 지남 16), 약·분류 인계 1, 확정 대기 3(가장 가까운 시한 9시간)", () => {
+    expect(inboxSummary(items())).toEqual({
+      redflag: 16,
+      redflagOverdue: 16,
+      otherHandover: 1,
+      otherHandoverOverdue: 1,
+      deposit: 3,
+      depositOverdue: 0,
+      nextDepositMinutes: 9 * 60,
+      total: 40,
+    });
+    // 발송한 건은 할 일에서 빠진다.
+    expect(inboxSummary(items({ sent: new Set(["Q06"]), handedOver: new Map() })).redflag).toBe(15);
+  });
+
+  it("적신호 묶음은 접으면 2건만 보이고, 그 아래 약 인계·확정 대기가 바로 이어진다", () => {
+    const rows = inboxRows(items(), { collapseRedflag: true });
+    const firstTen = rows.slice(0, 10).map((r) => (r.type === "item" ? r.item.id : r.type === "more" ? `+${r.hidden}` : r.text));
+    expect(firstTen).toEqual(["적신호 인계", "Q06", "Q07", "+14", "약·분류 인계", "Q25", "예약금 받음 · 확정 대기", "Q01", "Q15", "Q31"]);
+    expect(inboxRows(items(), { collapseRedflag: false }).filter((r) => r.type === "item")).toHaveLength(40);
   });
 });
 
@@ -190,6 +233,19 @@ describe("문의 분석(가림 → 게이트 → 경과일 → 검색)", () => {
     expect(diff).toEqual([]);
   });
 
+  it("근거 약함(PRD F7): 최고 점수가 기준 미만이면 weak — 와이파이는 weak, 대본 질문(G16)은 아니다", () => {
+    expect(MIN_TOP_SCORE).toBe(9);
+    const wifi = analyzeStaffQuestion(k, "대기실 와이파이 비밀번호가 뭐예요?");
+    expect([wifi.retrieval.weak, wifi.retrieval.hits.length > 0]).toEqual([true, true]);
+    expect(wifi.retrieval.topScore).toBeLessThan(MIN_TOP_SCORE);
+    expect(analyzeStaffQuestion(k, "수술 3일째 환자가 머리를 감아도 되냐고 물으면 뭐라고 해요?").retrieval.weak).toBe(false);
+    expect(analyzeStaffQuestion(k, "오늘 날씨 어때요?").retrieval).toMatchObject({ weak: true, topScore: 0, hits: [] });
+    // 경과일로 앞에 세운 문단(점수 0일 수 있음)은 근거 강도에 넣지 않는다.
+    const boosted = retrieve(k.index, "reply", "대기실 와이파이 비밀번호", 3);
+    expect(boosted.hits[0].postopBoost).toBe(true);
+    expect(boosted.weak).toBe(true);
+  });
+
   it("제외 문서(옛 판·초안)는 결과에 없고 '제외됨' 보고에만 있다", () => {
     const a = analyzeInquiry(k, "kakao", "예약금 환불은 며칠 전까지 취소해야 돼요?");
     expect(a.retrieval!.hits.every((h) => h.chunk.docId !== "V04b" && h.chunk.docId !== "V20")).toBe(true);
@@ -208,7 +264,32 @@ describe("평가 탭(F15) — 녹화 없음", () => {
     // scripts/eval-retrieval.ts의 '문단@5 40/42'와 같아야 한다(같은 retrieve).
     expect([m("retrieval-hit").numerator, m("retrieval-hit").denominator]).toEqual([40, 42]);
     expect(m("retrieval-hit").failures.map((f) => f.id)).toEqual(["G46", "G49"]);
-    expect([m("hold-recall-rule").numerator, m("hold-recall-rule").denominator]).toEqual([3, 3]);
+    expect([m("handover-golden-rule").numerator, m("handover-golden-rule").denominator]).toEqual([3, 3]);
+  });
+
+  it("PRD 기준을 다 재지 않은 지표에 '기준 충족'을 달지 않는다", () => {
+    // 적신호 누락: 별도 10문장 측정 전.
+    expect(m("redflag-miss").verdict).toEqual({ tone: "neutral", label: "자기 시험 통과 · 별도 10문장 미측정" });
+    // 검색 적중률: 볼트를 골든셋에 맞춘 곳이 있어 조건을 붙인다.
+    expect(m("retrieval-hit").verdict).toEqual({ tone: "good", label: "기준 충족(합성·검수 전)" });
+    expect(m("retrieval-hit").note).toContain("PRD 8절");
+    // PRD에 없는 지표는 PRD 이름·기준을 빌리지 않는다.
+    const rule = m("handover-golden-rule");
+    expect([rule.name.includes("보류 재현율"), rule.target, rule.pass, rule.verdict.label]).toEqual([false, "기록만", null, "기록만"]);
+    expect(rule.note).toContain("2건 겹침");
+    expect(metrics.find((x) => x.key === "hold-recall-rule")).toBeUndefined();
+  });
+
+  it("분모가 10보다 작으면 퍼센트를 적지 않는다", () => {
+    expect(metricValue(m("handover-golden-rule"))).toBe("3 / 3");
+    expect(metricValue(m("retrieval-hit"))).toBe("40 / 42 (95.2%)");
+    expect(metricValue(m("false-hold"))).toBe("AI 답 준비 전");
+  });
+
+  it("검색 단계 보류(근거 약함): 근거 없음 3/8, 답할 수 있는 39문항은 하나도 막지 않는다", () => {
+    expect([m("weak-hold-nosource").numerator, m("weak-hold-nosource").denominator]).toEqual([3, 8]);
+    expect(m("weak-hold-answerable").numerator).toBe(0);
+    expect(m("weak-hold-answerable").denominator).toBe(39); // mustHold=false: answerable 30 + trap 5 + 직원 절차 질문 4
   });
 
   it("녹화가 필요한 지표는 '녹화 전'이고 숫자를 지어내지 않는다", () => {

@@ -193,6 +193,17 @@ export interface LlmRouteOpinion {
 /** 규칙 게이트의 ID. MED-01은 적신호가 아닌 약 문의 규칙(V17, core/medication.ts)이다. */
 export type RuleId = RedflagRuleId | "MED-01";
 
+/**
+ * 규칙 ID의 뜻을 직원이 읽는 말로(인계 카드에 보인다). 머리말의 판정표·checkRedflags의 분기와 한 파일에 둔다 —
+ * 화면 컴포넌트가 따로 적어 두면 규칙이 바뀌어도 설명만 옛 뜻으로 남는다. 단어 목록 자체는 V11·V17에 있다.
+ */
+export const RULE_DESCRIPTION: Record<RuleId, string> = {
+  "RF-01": "증상 표현과 수술 뒤라는 말이 함께 있음 → 긴급 인계",
+  "RF-02": "증상 표현이 있음(수술 뒤인지 몰라도) → 인계",
+  "RF-03": "애매한 표현과 수술 뒤라는 말이 함께 있음 → 인계",
+  "MED-01": "약 용량·중단·함께 먹기를 물음 → 인계",
+};
+
 /** mergeRoute가 보는 규칙 판정. 적신호 게이트와 약 문의 규칙을 합친 결과도 이 모양이다. */
 export interface RuleVerdict {
   decision: "handover" | "pass";

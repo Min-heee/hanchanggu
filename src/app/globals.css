@@ -130,7 +130,7 @@ p {
 }
 
 .top {
-  max-width: 960px;
+  max-width: 1120px;
   margin: 0 auto;
   padding: 12px 16px 0;
 }
@@ -145,10 +145,11 @@ p {
 }
 nav.tabs {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 4px;
   margin-top: 8px;
   border-bottom: 1px solid var(--line);
-  overflow-x: auto;
 }
 nav.tabs a {
   min-height: 44px;
@@ -167,7 +168,7 @@ nav.tabs a[aria-current="page"] {
 }
 
 main {
-  max-width: 960px;
+  max-width: 1120px;
   margin: 0 auto;
   padding: 16px 16px 64px;
 }
@@ -319,13 +320,17 @@ ul.inbox a.item {
   border: 1px solid var(--line);
   border-left: 6px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 8px 12px;
 }
 ul.inbox a.item.g0 {
   border-left-color: var(--red);
   background: linear-gradient(90deg, var(--red-bg), var(--surface) 40%);
 }
 ul.inbox a.item.g1 {
+  border-left-color: var(--red);
+  background: linear-gradient(90deg, var(--red-bg), var(--surface) 25%);
+}
+ul.inbox a.item.g2 {
   border-left-color: var(--orange);
   background: linear-gradient(90deg, var(--orange-bg), var(--surface) 40%);
 }
@@ -337,17 +342,21 @@ ul.inbox .meta {
   font-size: 0.85rem;
   color: var(--muted);
 }
+ul.inbox .meta .when {
+  margin-left: auto;
+  font-size: 0.8rem;
+}
 ul.inbox .text {
   margin: 4px 0 0;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.group-title {
+ul.inbox li.group-title {
   font-size: 0.9rem;
   color: var(--muted);
-  margin: 16px 0 6px;
+  margin: 10px 0 4px;
   font-weight: 700;
 }
 
@@ -439,6 +448,31 @@ ol.hits li {
   padding: 0 4px;
   font-weight: 700;
 }
+/* 초안 속 가격 칸은 눌러서 가격표 문단을 칠한다. 문장 안이라 44px로 키우지 않고 투명 여백으로 누르는 영역을 넓힌다. */
+button.fill {
+  min-height: 0;
+  min-width: 0;
+  display: inline;
+  border: 1px dashed var(--green);
+  font: inherit;
+  font-weight: 700;
+  position: relative;
+}
+button.fill::after {
+  content: "";
+  position: absolute;
+  inset: -10px -4px;
+}
+mark.hit {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+}
+.snippet {
+  margin: 4px 0 0;
+  color: var(--text);
+}
 pre.masked {
   white-space: pre-wrap;
   background: var(--surface-2);
@@ -447,12 +481,64 @@ pre.masked {
   margin: 6px 0 0;
   font-family: inherit;
 }
+/*
+ * 접이식 제목. display:flex면 브라우저 기본 삼각형(::marker)이 그려지지 않아 굵은 글씨처럼만 보였다.
+ * 기본 표시를 끄고 ▸/▾를 직접 붙인 뒤, 누를 수 있다는 것이 보이게 테두리를 준다.
+ */
 details > summary {
   min-height: 44px;
   display: flex;
   align-items: center;
+  gap: 8px;
   cursor: pointer;
   font-weight: 600;
+  list-style: none;
+  padding: 4px 10px;
+  margin: 6px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+details > summary::before {
+  content: "▸";
+  flex: none;
+  color: var(--accent);
+}
+details[open] > summary::before {
+  content: "▾";
+}
+details > summary:hover {
+  border-color: var(--accent);
+}
+details.dev > summary {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+details.card.fold > summary {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* 문장형 안내 상자. 배지(한 줄, 줄바꿈 없음)와 달리 휴대폰 폭에서 줄이 바뀐다. */
+.note {
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: var(--surface-2);
+  border-left: 4px solid var(--line);
+}
+.note.warn {
+  background: var(--orange-bg);
+  border-left-color: var(--orange);
+  color: var(--text);
+}
+.note p:last-child {
+  margin-bottom: 0;
 }
 table.metrics {
   width: 100%;
@@ -513,6 +599,175 @@ table.metrics td {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* 첫 화면 소개와 30초 둘러보기. 목록이 첫 화면에 들어오게 짧게 둔다. */
+.intro {
+  margin-bottom: 10px;
+}
+.intro p {
+  margin-bottom: 6px;
+}
+.tour {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: center;
+}
+.tour a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.card.tryit {
+  padding: 10px 14px;
+}
+.tryit-title {
+  font-size: 1rem;
+  margin: 0;
+}
+.card.tryit input {
+  width: 100%;
+}
+.card.tryit select {
+  max-width: 150px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+button.chip {
+  border-radius: 999px;
+  font-size: 0.9rem;
+}
+button.chip[aria-pressed="true"],
+button.link[aria-pressed="true"] {
+  background: var(--blue-bg);
+  border-color: var(--accent);
+  color: var(--blue);
+  font-weight: 700;
+}
+button.link {
+  text-align: left;
+  min-height: 44px;
+}
+button.more {
+  width: 100%;
+  border-style: dashed;
+  color: var(--red);
+  font-weight: 700;
+}
+ul.plain {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.radio-row {
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 0;
+  color: var(--text) !important;
+  font-size: 1rem !important;
+}
+.radio-row input {
+  min-height: 24px;
+  width: 24px;
+  flex: none;
+}
+.result-title {
+  scroll-margin-top: 90px;
+}
+.badge.wrap {
+  white-space: normal;
+}
+nav.tabs details.records {
+  margin-left: auto;
+  position: relative;
+}
+nav.tabs details.records > summary {
+  margin: 0;
+  font-weight: 400;
+  color: var(--muted);
+}
+.records-panel {
+  position: absolute;
+  right: 0;
+  z-index: 5;
+  width: min(420px, calc(100vw - 32px));
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 12px 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+details.filters-fold > summary {
+  font-weight: 400;
+}
+.summary-row {
+  margin-bottom: 4px;
+}
+
+@media (max-width: 600px) {
+  /* 휴대폰 첫 화면에 목록이 들어오게: 보조 문구를 숨기고, 칩 줄은 가로로 밀어 보게 한다(페이지 가로 스크롤은 생기지 않음). */
+  .wide-only {
+    display: none !important;
+  }
+  .tour,
+  .chips {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .tour a,
+  .tour > span,
+  button.chip {
+    white-space: nowrap;
+    flex: none;
+  }
+  .tryit-title {
+    flex-basis: 100%;
+  }
+  .card.tryit form > label {
+    flex: 1 1 150px !important;
+  }
+  .intro p {
+    font-size: 0.95rem;
+  }
+  nav.tabs a {
+    padding: 0 10px;
+  }
+  button.summary {
+    font-size: 0.85rem;
+    padding: 0 10px;
+  }
+  ul.inbox .text {
+    -webkit-line-clamp: 2;
+  }
+  ul.inbox .meta .when {
+    margin-left: 0;
+  }
+  .band {
+    font-size: 0.78rem;
+    padding: 4px 12px;
+  }
+  .band .band-now {
+    display: none;
+  }
+  .top .brand small {
+    display: none;
+  }
 }
 
 /* 목록 요약 버튼. 색과 함께 글자로 종류를 적는다. */

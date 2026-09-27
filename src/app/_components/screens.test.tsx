@@ -1,0 +1,72 @@
+/**
+ * 화면 전체를 서버 렌더로 찍어 본다(renderToStaticMarkup). 뷰 모델 시험은 컴포넌트가 그 함수에 **어떤 값을 넘기는지**
+ * (예: 상세 화면이 인계 카드에 V12 대신 AI 초안을 넘기거나, 목록이 가린 글 대신 원문을 넘기는 것)를 잡지 못한다.
+ * 번들(src/generated/bundle.json)이 있어야 돈다 — npm test 앞의 pretest가 없으면 만든다.
+ * 이 렌더는 localStorage가 없는 서버 쪽 첫 화면(시연 기록 없음)이다.
+ */
+
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+import { readHandoverPolicy } from "@/demo/policy";
+import { bundle, engine } from "../_lib/data";
+import { Inbox } from "./Inbox";
+import { InquiryDetail } from "./InquiryDetail";
+
+const V12 = readHandoverPolicy(engine().k.chunks).patientMessage!.value;
+
+function quotes(html: string): string[] {
+  return [...html.matchAll(/<p class="quote"[^>]*>([^<]*)<\/p>/g)].map((m) => m[1]);
+}
+
+describe("통합 목록 첫 화면", () => {
+  const html = renderToStaticMarkup(<Inbox />);
+
+  it("미리보기는 가린 글이다 — 주민번호·전화·이메일이 목록에 찍히지 않는다", () => {
+    expect(html).not.toContain("900101-1234567");
+    expect(html).not.toContain("010-0000-1234");
+    expect(html).not.toContain("sample.user@example.com");
+    expect(html).toContain("[주민번호]");
+    expect(html).toContain("개인정보 가림");
+  });
+
+  it("적신호 묶음은 접혀 있고, 약 문의 인계와 확정 대기가 그 아래 바로 온다", () => {
+    const iQ25 = html.indexOf("/inquiry/Q25");
+    const iQ01 = html.indexOf("/inquiry/Q01");
+    const iMore = html.indexOf("적신호 인계 14건 더 보기");
+    expect(iMore).toBeGreaterThan(0);
+    expect(iMore).toBeLessThan(iQ25);
+    expect(iQ25).toBeLessThan(iQ01);
+    expect(html).not.toContain("/inquiry/Q08"); // 접힌 적신호
+  });
+});
+
+describe("문의 상세", () => {
+  it("인계 카드에는 V12 승인 문구만 — 원문 인용과 함께 찍히는 글은 가린 원문과 V12 둘뿐", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q06" />);
+    const qs = quotes(html);
+    expect(qs).toContain(V12);
+    expect(qs).toHaveLength(2);
+    expect(html).toContain("AI에 보내지 않음 — 안전 규칙이 먼저 잡음");
+    expect(html).not.toContain("AI가 받은 글");
+  });
+
+  it("주민번호가 든 문의(Q17)는 원문 인용도 가린 글이 기본이고, 원문 보기에서도 주민번호는 가린다", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q17" />);
+    expect(html).not.toContain("900101-1234567");
+    expect(html).toContain("원문 보기(직원만 · 주민번호는 계속 가림)");
+  });
+
+  it("예약금 문의(Q01): 확정 대기 카드가 경과일 카드보다 먼저, 경과일은 접힌 한 줄", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q01" />);
+    expect(html.indexOf("예약금 받음 · 확정 대기")).toBeLessThan(html.indexOf("경과일: 문의에 적힌 값 없음"));
+    expect(html).toContain("안내할 때 근거 규정");
+  });
+
+  // 미리 만든 AI 답이 들어오면 미리보기 대신 초안의 가격 칸이 보인다. 그때는 이 시험을 건너뛴다.
+  it.skipIf(bundle.recording !== null)("가격 문의(Q02): AI 답 전에도 가격 칸 미리보기가 가격표 값으로", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q02" />);
+    expect(html).toContain("가격 칸 미리보기");
+    expect(html).toContain("2,000원/모");
+    expect(html).toContain("AI 초안은 아직 준비 전입니다");
+  });
+});

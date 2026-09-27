@@ -14,11 +14,11 @@
 import { groupHitsByDoc, type Knowledge } from "../core/knowledge";
 import { maskPii } from "../core/mask";
 import { readPostopDay } from "../core/postop";
-import { retrieve } from "../core/retrieve";
+import { MIN_TOP_SCORE, retrieve } from "../core/retrieve";
 import { decideRoute, type LlmStage } from "../core/route";
 import { classifyInquiry, type ClassifyResult } from "../llm/classify";
 import type { ClaudeClient } from "../llm/client";
-import { generateDraft } from "../llm/draft";
+import { generateDraft, holdBeforeModel } from "../llm/draft";
 import type { DemoRecording, GoldenRecord, InquiryRecord } from "./recording";
 
 type Usage = { input_tokens: number; output_tokens: number };
@@ -27,17 +27,20 @@ type UsageLike = { input_tokens: number; output_tokens: number; iterations?: Rea
 async function draftFor(client: ClaudeClient, k: Knowledge, mode: "reply" | "staff-qa", channel: string | null, maskedText: string, postopDay: number | null) {
   // 화면과 같은 검색 함수(core/retrieve.ts). 문의는 날짜·폼 칸 이름을 뺀 질의 + 경과일 앞세우기, 직원 질문은 그대로.
   const r = retrieve(k.index, mode, maskedText, postopDay);
-  const draft = await generateDraft(client, {
-    mode,
-    channel,
-    maskedText,
-    sources: groupHitsByDoc(r.hits, k.titles),
-    allowedDocIds: k.allowedDocIds,
-    tone: k.tone,
-    prices: k.prices,
-    hours: k.hours,
-    ad: k.ad,
-  });
+  // 근거가 약하면(PRD F7) 모델을 부르지 않는다. 화면의 ① '근거 약함 — 문서 빈칸'과 같은 판정이다.
+  const draft = r.weak
+    ? holdBeforeModel("weak-retrieval", `검색 점수가 기준보다 낮아(최고 ${r.topScore.toFixed(2)} < ${MIN_TOP_SCORE}) 모델을 부르지 않았습니다(문서 빈칸)`)
+    : await generateDraft(client, {
+        mode,
+        channel,
+        maskedText,
+        sources: groupHitsByDoc(r.hits, k.titles),
+        allowedDocIds: k.allowedDocIds,
+        tone: k.tone,
+        prices: k.prices,
+        hours: k.hours,
+        ad: k.ad,
+      });
   return {
     draft,
     retrieval: r.hits.map((h) => ({ chunkId: h.chunk.chunkId, score: h.score })),
@@ -136,7 +139,7 @@ export async function recordAll(
     const d = await draftFor(client, k, "staff-qa", null, masked, null);
     addUsage(total, d.draft.meta.usage);
     noteModel(d.draft.meta.model);
-    goldenRecords.push({ id: g.id, question: g.question!, ...d });
+    goldenRecords.push({ id: g.id, question: g.question!, maskedQuestion: masked, ...d });
     log(`${g.id} → ${d.draft.status}`);
   }
 

@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { buildKnowledge } from "../src/core/knowledge";
 import { loadVault } from "../src/core/vault";
+import { DEMO_AS_OF } from "../src/demo/clock";
 import { recordAll } from "../src/demo/record";
 import type { DemoRecording } from "../src/demo/recording";
 import { createClaudeClient } from "../src/llm/client";
@@ -39,8 +40,9 @@ async function main() {
   const limit = limitArg !== -1 ? Number(process.argv[limitArg + 1]) : Infinity;
 
   const client = createClaudeClient(); // 키가 없으면 여기서 멈춘다.
-  // 시행일이 오늘 뒤인 문서는 쓰지 않는다. 코어는 시계를 읽지 않으므로 여기서 오늘(서울) 날짜를 넘긴다.
-  const asOf = new Date().toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" });
+  // 볼트 시행일 기준은 화면과 같은 시연 기준일(src/demo/clock.ts DEMO_AS_OF) 하나다. 녹화하는 날의 날짜를 쓰면
+  // 화면이 고른 문서 묶음과 모델이 받은 문서 묶음이 달라질 수 있다. 번들 생성이 두 값이 다르면 멈춘다.
+  const asOf = DEMO_AS_OF;
   const kr = buildKnowledge(loadVault(readVaultDir(join(ROOT, "vault")), { asOf }));
   if (!kr.ok) throw new Error(`볼트를 읽지 못했습니다:\n${kr.errors.join("\n")}`);
 
