@@ -1,0 +1,532 @@
+/*
+ * 한창구 화면. 색은 토큰으로만 쓴다. 상태는 색과 함께 글자 라벨을 언제나 붙인다(색만으로 구분하지 않음).
+ * 버튼·링크 행은 최소 44px(손가락 터치). 휴대폰 폭(360px)에서 가로 스크롤이 생기지 않게 한다.
+ */
+
+:root {
+  --bg: #f6f6f3;
+  --surface: #ffffff;
+  --surface-2: #f0efea;
+  --text: #1c1c1a;
+  --muted: #5b5a55;
+  --line: #d9d7cf;
+  --accent: #1f5fbf;
+  --accent-ink: #ffffff;
+  --focus: #1f5fbf;
+
+  --red: #b3261e;
+  --red-bg: #fbe9e7;
+  --orange: #8a4b00;
+  --orange-bg: #fff1dc;
+  --green: #1d6b3a;
+  --green-bg: #e5f4ea;
+  --gray: #4a4a46;
+  --gray-bg: #ecebe6;
+  --blue: #1f4f99;
+  --blue-bg: #e6eefb;
+  --mark: #fff0a8;
+
+  --band-bg: #2b2a27;
+  --band-text: #ffffff;
+  --radius: 10px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161614;
+    --surface: #1f1f1c;
+    --surface-2: #292925;
+    --text: #efeee9;
+    --muted: #b3b1a8;
+    --line: #3d3c37;
+    --accent: #8fb6ff;
+    --accent-ink: #0f1830;
+    --focus: #8fb6ff;
+    --red: #ffb4ab;
+    --red-bg: #4a1714;
+    --orange: #ffc98a;
+    --orange-bg: #43290a;
+    --green: #9ad7ad;
+    --green-bg: #173323;
+    --gray: #d0cec6;
+    --gray-bg: #34332e;
+    --blue: #b0c8f5;
+    --blue-bg: #1b2a44;
+    --mark: #5c4f10;
+    --band-bg: #000000;
+    --band-text: #ffffff;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.3;
+  margin: 0 0 8px;
+}
+h1 {
+  font-size: 1.35rem;
+}
+h2 {
+  font-size: 1.1rem;
+}
+h3 {
+  font-size: 1rem;
+}
+p {
+  margin: 0 0 8px;
+}
+
+/* 상단 띠: 가상 의원·합성 데이터·미리 생성한 AI 응답을 항상 보인다(PRD 3절). */
+.band {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--band-bg);
+  color: var(--band-text);
+  font-size: 0.85rem;
+  padding: 6px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  justify-content: space-between;
+}
+.band strong {
+  font-weight: 700;
+}
+.band .fake {
+  background: #ffd54a;
+  color: #000;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.top {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 12px 16px 0;
+}
+.top .brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.top .brand small {
+  color: var(--muted);
+}
+nav.tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+}
+nav.tabs a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  text-decoration: none;
+  color: var(--muted);
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+nav.tabs a[aria-current="page"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 16px 16px 64px;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.card.alert {
+  border-left: 6px solid var(--red);
+}
+.card.warn {
+  border-left: 6px solid var(--orange);
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 0.875rem;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.stack > * + * {
+  margin-top: 8px;
+}
+
+button,
+.button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+button.primary,
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+button.link {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  padding: 0 6px;
+  text-decoration: underline;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-height: 44px;
+  padding: 8px 10px;
+  max-width: 100%;
+}
+textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+}
+label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+/* 배지·라벨: 글자 + 색. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--gray);
+  white-space: nowrap;
+}
+.badge.red {
+  background: var(--red-bg);
+  color: var(--red);
+  border-color: transparent;
+}
+.badge.orange {
+  background: var(--orange-bg);
+  color: var(--orange);
+  border-color: transparent;
+}
+.badge.green {
+  background: var(--green-bg);
+  color: var(--green);
+  border-color: transparent;
+}
+.badge.blue {
+  background: var(--blue-bg);
+  color: var(--blue);
+  border-color: transparent;
+}
+.badge.gray {
+  background: var(--gray-bg);
+  color: var(--gray);
+  border-color: transparent;
+}
+
+/* 통합 목록 */
+ul.inbox {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+ul.inbox li {
+  margin-bottom: 8px;
+}
+ul.inbox a.item {
+  display: block;
+  min-height: 44px;
+  text-decoration: none;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 6px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+ul.inbox a.item.g0 {
+  border-left-color: var(--red);
+  background: linear-gradient(90deg, var(--red-bg), var(--surface) 40%);
+}
+ul.inbox a.item.g1 {
+  border-left-color: var(--orange);
+  background: linear-gradient(90deg, var(--orange-bg), var(--surface) 40%);
+}
+ul.inbox .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+ul.inbox .text {
+  margin: 4px 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.group-title {
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin: 16px 0 6px;
+  font-weight: 700;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.filters label {
+  flex: 1 1 140px;
+}
+.filters select {
+  width: 100%;
+}
+
+/* 단계 표시 ①~④ */
+.step-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.step-num {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  flex: none;
+}
+ol.hits {
+  padding-left: 0;
+  list-style: none;
+  margin: 0;
+}
+ol.hits li {
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
+.para {
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  margin: 6px 0;
+  white-space: pre-wrap;
+  scroll-margin-top: 80px;
+}
+.para.hl {
+  background: var(--mark);
+  outline: 2px solid var(--orange);
+}
+.cite {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  font-size: 0.8rem;
+  vertical-align: super;
+  border-radius: 6px;
+  margin-left: 2px;
+  background: var(--blue-bg);
+  color: var(--blue);
+  border: 1px solid transparent;
+}
+/* 인용 번호는 문장 안에서 44px로 키우면 읽기 어렵다. 대신 눌리는 영역을 투명 여백으로 넓힌다. */
+.cite {
+  position: relative;
+}
+.cite::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+.sentence {
+  margin: 0 0 6px;
+}
+.sentence.bad {
+  background: var(--red-bg);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.fill {
+  background: var(--green-bg);
+  color: var(--green);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-weight: 700;
+}
+pre.masked {
+  white-space: pre-wrap;
+  background: var(--surface-2);
+  padding: 8px 10px;
+  border-radius: 8px;
+  margin: 6px 0 0;
+  font-family: inherit;
+}
+details > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+table.metrics {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+table.metrics th,
+table.metrics td {
+  text-align: left;
+  border-top: 1px solid var(--line);
+  padding: 8px 6px;
+  vertical-align: top;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.two-col {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 820px) {
+  .two-col {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+  /* 넓은 화면에서는 ③④를 붙잡아 두어, 인용 번호를 누르면 옆의 ②에서 칠해진 문단을 바로 본다. */
+  .sticky-col {
+    position: sticky;
+    top: 48px;
+    max-height: calc(100vh - 56px);
+    overflow-y: auto;
+  }
+}
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  font-size: 0.95rem;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+}
+.quote {
+  border-left: 4px solid var(--accent);
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border-radius: 0 8px 8px 0;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* 목록 요약 버튼. 색과 함께 글자로 종류를 적는다. */
+button.summary {
+  border-left: 6px solid var(--line);
+  font-weight: 700;
+}
+button.summary.red {
+  border-left-color: var(--red);
+  background: var(--red-bg);
+  color: var(--red);
+}
+button.summary.orange {
+  border-left-color: var(--orange);
+  background: var(--orange-bg);
+  color: var(--orange);
+}
