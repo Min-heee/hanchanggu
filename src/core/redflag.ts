@@ -101,11 +101,80 @@ export function normalizeForMatch(s: string): string {
   return s.normalize("NFKC").toLowerCase().replace(/\s+/g, "");
 }
 
-function findTerms(textNorm: string, terms: string[]): string[] {
+/**
+ * 공백을 지운 글자와, 지운 자리(어절 경계)의 위치.
+ * 공백을 그냥 모두 지우면 "있고 열감"이 "있고열감"이 되어 그 안의 "고열"이 걸린다. 환자가 쓰지 않은 증상어가
+ * '걸린 말'로 의료진에게 보이고, 모호어(열감)가 증상어(고열)로 바뀌어 규칙(RF-03→RF-01)과 긴급도까지 달라진다.
+ * 그래서 공백은 지우되 어디서 지웠는지를 남겨, 적중이 어절 경계를 어떻게 넘는지 본다.
+ */
+interface Spaced {
+  text: string;
+  /** 이 위치 앞에서 공백을 지웠다(= 새 어절이 여기서 시작). 맨 앞(0)은 넣지 않는다. */
+  boundaries: Set<number>;
+}
+
+function normalizeWithBoundaries(s: string): Spaced {
+  const src = s.normalize("NFKC").toLowerCase();
+  let text = "";
+  const boundaries = new Set<number>();
+  let pendingSpace = false;
+  for (const ch of src) {
+    if (/\s/u.test(ch)) {
+      pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace && text !== "") boundaries.add(text.length);
+    pendingSpace = false;
+    text += ch;
+  }
+  return { text, boundaries };
+}
+
+/**
+ * 한글 음절·글자·숫자면 어절 안의 글자로 본다. 문장부호·기호·자모("ㅠㅠ")는 아니다.
+ * 환자는 "수술했는데,숨 차요"·"(숨 쉬기 힘들어요)"처럼 부호 뒤에 붙여 쓴다. 부호 바로 뒤를 첫머리로 보지 않으면
+ * 공백 경계를 넘는 증상어("숨 차")를 조용히 놓친다. 부호는 지우지 않으므로 적중이 부호를 넘어 붙는 일은 없다.
+ */
+const HANGUL_JAMO = /[\u1100-\u11FF\u3130-\u318F\uA960-\uA97F\uD7B0-\uD7FF]/u;
+function isWordChar(ch: string): boolean {
+  return /[\p{L}\p{N}]/u.test(ch) && !HANGUL_JAMO.test(ch);
+}
+
+/**
+ * 어절 경계를 넘는 적중을 받을지. 한 어절 안의 적중은 늘 받는다("고열이나요"처럼 붙여 써도 잡혀야 하므로).
+ * 경계를 넘으면 둘 중 하나일 때만 받는다.
+ * 1) 적중이 어절 첫머리에서 시작한다: "숨 차요"의 "숨차", "고 열이"(띄어쓰기 실수)의 "고열".
+ *    문장 맨 앞, 공백 뒤, 문장부호·기호·자모 바로 뒤를 첫머리로 본다("수술했는데,숨 차요", "(D + 3)").
+ *    "있고 열감"·"하고 열이"의 "고열"은 앞 어절의 끝(어미)에서 시작하므로 받지 않는다.
+ * 2) 목록 단어에 공백이 있다: "가슴 답답", "피가 안 멈", "일 됐".
+ *    간호팀이 띄어 쓴 단어는 여러 어절에 걸친 표현이라 환자가 어디서 띄우든("앞가슴 이 답답해요",
+ *    "코피 가 계속 나요") 잡아야 한다. 과잉 인계는 허용하고 누락은 허용하지 않으므로(V11) 받는 쪽으로 둔다
+ *    — 수정 전(공백 전부 제거) 판정과 같다. 공백 없는 목록 단어("고열")는 2)로 받지 않는다 —
+ *    "있고 열감"을 막는 것은 이 성질이다.
+ * 한 적중이 거부돼도 뒤 적중을 계속 본다: "있고 열감이 있는데 밤엔 고열이에요"의 두 번째 "고열".
+ */
+function matchesTerm(n: Spaced, term: Spaced): boolean {
+  const t = term.text;
+  if (t === "") return false;
+  if (term.boundaries.size > 0) return n.text.includes(t);
+  for (let i = n.text.indexOf(t); i !== -1; i = n.text.indexOf(t, i + 1)) {
+    let crosses = false;
+    for (let k = i + 1; k < i + t.length; k++) {
+      if (n.boundaries.has(k)) {
+        crosses = true;
+        break;
+      }
+    }
+    if (!crosses) return true;
+    if (i === 0 || n.boundaries.has(i) || !isWordChar(n.text[i - 1])) return true;
+  }
+  return false;
+}
+
+function findTerms(text: Spaced, terms: string[]): string[] {
   const hits: string[] = [];
   for (const t of terms) {
-    const n = normalizeForMatch(t);
-    if (n !== "" && textNorm.includes(n) && !hits.includes(t)) hits.push(t);
+    if (matchesTerm(text, normalizeWithBoundaries(t)) && !hits.includes(t)) hits.push(t);
   }
   return hits;
 }
@@ -137,7 +206,7 @@ function findPatterns(text: string, patterns: string[]): string[] {
  * (가림 표시 "[이름]" 등은 증상어와 겹치지 않는다).
  */
 export function checkRedflags(text: string, config: RedflagConfig): RedflagResult {
-  const norm = normalizeForMatch(text);
+  const norm = normalizeWithBoundaries(text);
   const matchedSymptoms = [...findTerms(norm, config.symptoms)];
   for (const f of findFever(text, config.feverThresholdCelsius)) if (!matchedSymptoms.includes(f)) matchedSymptoms.push(f);
   const matchedAmbiguous = findTerms(norm, config.ambiguous);

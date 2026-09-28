@@ -172,6 +172,78 @@ describe("checkRedflags — 실제 V11로 변형 문장이 모두 인계된다",
   });
 });
 
+/**
+ * 공백을 모두 지우고 비교하면 앞 어절의 어미와 뒤 어절이 붙어 없던 증상어가 생긴다("있고 열감" → "고열").
+ * 걸린 말은 의료진이 인계 카드에서 읽는 값이고, 모호어가 증상어로 바뀌면 RF-03이 RF-01(긴급)이 된다.
+ * 실제 V11로 본다 — "고열"은 픽스처 목록에 없다.
+ */
+describe("checkRedflags — 어절 경계(실제 V11)", () => {
+  const cfg = realV11();
+
+  it("'있고 열감'에서 '고열'이 걸리지 않는다: 문맥이 없으면 모호어만 남아 통과(메모)", () => {
+    const r = checkRedflags("두피에 뾰루지가 있고 열감이 있어요", cfg);
+    expect(r.matchedSymptoms).toEqual([]);
+    expect(r.matchedAmbiguous).toContain("열감");
+    expect([r.decision, r.ruleIds, r.notes.length]).toEqual(["pass", [], 1]);
+  });
+
+  it("'하고 열이'·'붓고 열감'에서 '고열'이 걸리지 않는다: 수술 후 문맥이 있으면 RF-03(긴급 아님)", () => {
+    for (const text of ["수술하고 열이 나요", "이식 부위가 붓고 열감이 있어요"]) {
+      const r = checkRedflags(text, cfg);
+      expect(r.matchedSymptoms).toEqual([]);
+      expect([r.decision, r.urgency, r.ruleIds]).toEqual(["handover", "normal", ["RF-03"]]);
+    }
+  });
+
+  it("문맥어도 같다: '했어 제가'에서 '어제'가 걸리지 않는다", () => {
+    expect(checkRedflags("예약 바꿨어 제가 다시 연락할게요", cfg).matchedContext).toEqual([]);
+  });
+
+  it("붙여 쓴 진짜 증상은 계속 잡는다: '고열이나요', '피가안멈춰요'", () => {
+    expect(checkRedflags("고열이나요", cfg)).toMatchObject({ decision: "handover", matchedSymptoms: expect.arrayContaining(["고열"]) });
+    expect(checkRedflags("피가안멈춰요", cfg)).toMatchObject({ decision: "handover", matchedSymptoms: expect.arrayContaining(["피가 안 멈"]) });
+  });
+
+  it("어절 첫머리에서 시작하면 공백을 넘어도 잡는다: '어제부터 숨 차요', '밤에 고 열이 나요', '피가안 멈춰요'", () => {
+    expect(checkRedflags("어제부터 숨 차요", cfg).matchedSymptoms).toContain("숨차");
+    expect(checkRedflags("밤에 고 열이 나요", cfg).matchedSymptoms).toContain("고열");
+    expect(checkRedflags("피가안 멈춰요", cfg).matchedSymptoms).toContain("피가 안 멈");
+  });
+
+  it("목록에 띄어 쓴 자리와 문장의 띄어쓰기가 같으면 앞에 글자가 붙어도 잡는다: '앞가슴 답답해요', '코피가 안 멈춰요'", () => {
+    expect(checkRedflags("앞가슴 답답해요", cfg)).toMatchObject({ decision: "handover", matchedSymptoms: ["가슴 답답"] });
+    expect(checkRedflags("앞가슴이 아파요", cfg).matchedSymptoms).toContain("가슴이 아");
+    expect(checkRedflags("코피가 안 멈춰요", cfg).matchedSymptoms).toContain("피가 안 멈");
+  });
+
+  it("목록 단어에 공백이 있으면 문장이 어디서 띄우든 잡는다: '코피가안 멈춰요', '3일 됐어요', '앞가슴 이 답답해요', '코피 가 계속 나요'", () => {
+    // 목록의 두 번째 공백 자리("피가 안| 멈")에서 띄운 문장, 목록과 다른 자리("앞가슴 |이")에서 띄운 문장.
+    // 어절 중간에서 시작해 목록에 없는 자리에서 띄운 문장을 받지 않으면 수정 전에 인계되던 진짜 증상을 놓친다.
+    expect(checkRedflags("코피가안 멈춰요", cfg).matchedSymptoms).toContain("피가 안 멈");
+    expect(checkRedflags("이식 3일 됐어요", cfg).matchedContext).toContain("일 됐");
+    expect(checkRedflags("앞가슴 이 답답해요", cfg)).toMatchObject({ decision: "handover", ruleIds: ["RF-02"] });
+    expect(checkRedflags("코피 가 계속 나요", cfg)).toMatchObject({ decision: "handover", ruleIds: ["RF-02"] });
+    expect(checkRedflags("코피 가 계속 나요 수술 3일째", cfg)).toMatchObject({ decision: "handover", urgency: "urgent", ruleIds: ["RF-01"] });
+  });
+
+  it("문장부호·기호·자모 바로 뒤도 어절 첫머리다: '수술했는데,숨 차요', 'ㅠㅠ숨 차요', '(D + 3) 붓기가'", () => {
+    expect(checkRedflags("수술했는데,숨 차요", cfg)).toMatchObject({ decision: "handover", urgency: "urgent", ruleIds: ["RF-01"] });
+    expect(checkRedflags("어제부터요.숨 차요", cfg)).toMatchObject({ decision: "handover", ruleIds: ["RF-01"] });
+    for (const text of ["ㅠㅠ숨 차요", "(숨 쉬기 힘들어요)", '"숨 차"는 괜찮은 건가요']) {
+      expect(checkRedflags(text, cfg).decision).toBe("handover");
+    }
+    const d3 = checkRedflags("(D + 3) 붓기가 있어요", cfg);
+    expect(d3.matchedContext.length).toBeGreaterThan(0);
+    expect([d3.decision, d3.ruleIds]).toEqual(["handover", ["RF-03"]]);
+  });
+
+  it("앞 적중이 어미에 걸려 거부돼도 뒤 적중을 본다: '있고 열감이 있는데 밤엔 고열이에요'", () => {
+    const r = checkRedflags("있고 열감이 있는데 밤엔 고열이에요", cfg);
+    expect(r.matchedSymptoms).toContain("고열");
+    expect(r.decision).toBe("handover");
+  });
+});
+
 describe("extractSelfReportedDays", () => {
   it("환자가 쓴 수술 후 일수를 읽고, 겹치는 표현은 하나로 센다", () => {
     expect(extractSelfReportedDays("수술 9일째인데요")).toEqual([{ days: 9, text: "수술 9일" }]);
