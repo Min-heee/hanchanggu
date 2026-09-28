@@ -80,7 +80,7 @@ API 키 없이 돌아갑니다. 시연의 '현재 시각'은 월요일 오전 10
 | 인계가 정답인 골든 문의를 규칙이 인계 | 3 / 3 | PRD에 없음 | 표본이 작고, 2건은 적신호 누락과 겹칩니다 |
 
 - 검색 적중률은 `npm run eval:retrieval`로 다시 잴 수 있습니다. 평가 탭과 같은 검색 함수를 씁니다.
-- 테스트 382개가 통과합니다(`npm test`). 테스트와 기대값도 Claude Code가 쓴 초안입니다.
+- 테스트 389개가 통과합니다(`npm test`). 테스트와 기대값도 Claude Code가 쓴 초안입니다.
 - 코어 커밋(ceb87f6) 시점에 Claude Code가 코어 판단 코드에 일부러 버그를 넣는 변이 시험을 돌렸고, 94개 중 93개를 테스트가 잡았습니다(남은 1개는 동작이 같은 변이). 화면·경과일 코드가 더해진 뒤로는 다시 재지 않았습니다.
 
 ### 측정 전 (AI 분류·초안을 실제로 부른 뒤 잴 것)
@@ -104,7 +104,7 @@ Node `^20.19 || ^22.13 || >=24`.
 ```bash
 npm install
 npm run dev              # http://localhost:3000 — 시작 전에 번들을 새로 만든다
-npm test                 # 테스트 382개
+npm test                 # 테스트 389개
 npm run eval:retrieval   # 검색 적중률(키 필요 없음)
 npm run verify           # test + typecheck + lint + build
 ```

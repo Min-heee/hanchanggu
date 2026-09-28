@@ -32,11 +32,19 @@ describe("parseRedflagConfig", () => {
       postopContextPatterns: ["\\d{1,3}\\s*(일|주)\\s*(째|차)"],
       feverThresholdCelsius: 38,
       ambiguous: ["붓기", "가려", "빨개"],
+      nonSymptomWords: ["두피"],
     });
   });
 
+  it("nonSymptomWords는 빈 배열은 받고, 빠지면 거부한다(기본값을 채우지 않는다)", () => {
+    const base = { symptoms: ["고름"], postopContext: ["x"], ambiguous: [], postopContextPatterns: [], feverThresholdCelsius: 38 };
+    expect(parseRedflagConfig({ ...base, nonSymptomWords: [] }).ok).toBe(true);
+    expect(parseRedflagConfig(base).ok).toBe(false);
+    expect(parseRedflagConfig({ ...base, nonSymptomWords: [""] }).ok).toBe(false);
+  });
+
   it("증상어·문맥어가 비었거나 모양이 틀리면 거부한다(빈 목록은 '적신호 없음'처럼 보이므로)", () => {
-    const ok = { postopContextPatterns: [], feverThresholdCelsius: 38 };
+    const ok = { postopContextPatterns: [], feverThresholdCelsius: 38, nonSymptomWords: [] };
     expect(parseRedflagConfig({ ...ok, symptoms: [], postopContext: ["수술 후"], ambiguous: [] })).toEqual({ ok: false, error: "symptoms가 비어 있습니다" });
     expect(parseRedflagConfig({ ...ok, symptoms: ["고름"], postopContext: [], ambiguous: [] })).toEqual({ ok: false, error: "postopContext가 비어 있습니다" });
     expect(parseRedflagConfig({ ...ok, symptoms: ["고름", ""], postopContext: ["x"], ambiguous: [] }).ok).toBe(false);
@@ -45,7 +53,7 @@ describe("parseRedflagConfig", () => {
   });
 
   it("체온 기준·문맥 정규식은 빠지거나 틀리면 거부한다(기본값을 채우지 않는다)", () => {
-    const base = { symptoms: ["고름"], postopContext: ["x"], ambiguous: [], postopContextPatterns: [] };
+    const base = { symptoms: ["고름"], postopContext: ["x"], ambiguous: [], postopContextPatterns: [], nonSymptomWords: [] };
     expect(parseRedflagConfig(base)).toEqual({ ok: false, error: "feverThresholdCelsius는 37~40 사이의 숫자여야 합니다" });
     expect(parseRedflagConfig({ ...base, feverThresholdCelsius: 83 }).ok).toBe(false);
     expect(parseRedflagConfig({ ...base, feverThresholdCelsius: 38, postopContextPatterns: ["(열"] })).toEqual({
@@ -105,7 +113,7 @@ describe("checkRedflags — 판정표", () => {
   });
 
   it("단어 목록은 입력 json을 따른다(하드코딩 없음): 목록을 바꾸면 판정이 바뀐다", () => {
-    const custom: RedflagConfig = { symptoms: ["진물"], postopContext: ["시술 후"], postopContextPatterns: [], feverThresholdCelsius: 38, ambiguous: [] };
+    const custom: RedflagConfig = { symptoms: ["진물"], postopContext: ["시술 후"], postopContextPatterns: [], feverThresholdCelsius: 38, ambiguous: [], nonSymptomWords: [] };
     expect(checkRedflags("시술 후 진물이 나요", custom).ruleIds).toEqual(["RF-01"]);
     expect(checkRedflags("수술 후 고름이 나요", custom).decision).toBe("pass");
   });
@@ -241,6 +249,36 @@ describe("checkRedflags — 어절 경계(실제 V11)", () => {
     const r = checkRedflags("있고 열감이 있는데 밤엔 고열이에요", cfg);
     expect(r.matchedSymptoms).toContain("고열");
     expect(r.decision).toBe("handover");
+  });
+});
+
+/**
+ * 모발 의원 문의에는 "두피가"가 거의 매번 나온다. 그 안의 "피가"(출혈 조각)를 증상으로 읽으면
+ * 흔한 가려움·당김 문의가 전부 인계된다. V11 nonSymptomWords로 가린 뒤 찾는다.
+ */
+describe("checkRedflags — 증상이 아닌 단어(실제 V11 nonSymptomWords)", () => {
+  const cfg = realV11();
+
+  it.each(["두피가 계속 가려워요", "이식하고 두피가 가려워요", "수술 후 두피가 땅겨요"])("\"%s\"는 '피가'로 인계하지 않는다", (s) => {
+    const r = checkRedflags(s, cfg);
+    expect(r.decision).toBe("pass");
+    expect(r.matchedSymptoms).toEqual([]);
+    expect(r.matchedAmbiguous).not.toContain("피가");
+  });
+
+  it("두피 옆의 진짜 '피가'는 그대로 잡는다", () => {
+    expect(checkRedflags("두피에서 피가 나요", cfg).matchedAmbiguous).toContain("피가");
+    const r = checkRedflags("이식한 두피에서 피가 계속 나요", cfg);
+    expect(r).toMatchObject({ decision: "handover", urgency: "urgent", ruleIds: ["RF-01", "RF-03"] });
+    expect(r.matchedSymptoms).toContain("피가 계속");
+  });
+
+  it("다른 단어 속 '피가'(코피)는 가리지 않는다", () => {
+    expect(checkRedflags("코피가 안 멈춰요", cfg).decision).toBe("handover");
+  });
+
+  it("문맥어는 가리지 않는다(두피 주사 맞고 → 문맥 '주사 맞' 유지)", () => {
+    expect(checkRedflags("두피 주사 맞고 나서 두드러기가 나요", cfg).matchedContext).toContain("주사 맞");
   });
 });
 

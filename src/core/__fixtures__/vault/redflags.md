@@ -17,7 +17,8 @@ fictional: true
   "postopContext": ["수술 후", "이식 부위", "D+", "일째"],
   "postopContextPatterns": ["\\d{1,3}\\s*(일|주)\\s*(째|차)"],
   "feverThresholdCelsius": 38,
-  "ambiguous": ["붓기", "가려", "빨개"]
+  "ambiguous": ["붓기", "가려", "빨개"],
+  "nonSymptomWords": ["두피"]
 }
 ```
 

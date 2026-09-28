@@ -32,6 +32,12 @@ export interface RedflagConfig {
   /** 이 온도(섭씨) 이상이 숫자로 적혀 있으면 증상어로 본다. */
   feverThresholdCelsius: number;
   ambiguous: string[];
+  /**
+   * 증상어 조각을 품은 일반 단어("두피가"의 "피가"). 증상어·모호어를 찾기 전에 가린다.
+   * 모발 의원 문의에는 "두피"가 거의 매번 나오므로, 가리지 않으면 "두피가 가려워요"가 출혈 인계가 된다.
+   * 문맥어·체온 판정에는 쓰지 않는다(가려서 문맥을 잃으면 누락 쪽으로 기울기 때문).
+   */
+  nonSymptomWords: string[];
 }
 
 export type RedflagRuleId = "RF-01" | "RF-02" | "RF-03";
@@ -69,7 +75,9 @@ export function parseRedflagConfig(json: unknown): ConfigResult {
   const postopContext = stringList(o.postopContext, "postopContext");
   const ambiguous = stringList(o.ambiguous, "ambiguous");
   const patterns = stringList(o.postopContextPatterns, "postopContextPatterns");
-  for (const r of [symptoms, postopContext, ambiguous, patterns]) if (typeof r === "string") return { ok: false, error: r };
+  // 빈 배열은 허용한다(가릴 단어가 없는 병원). 값이 빠진 것은 거부한다 — 기본값을 채우지 않는다.
+  const nonSymptomWords = Array.isArray(o.nonSymptomWords) && o.nonSymptomWords.length === 0 ? [] : stringList(o.nonSymptomWords, "nonSymptomWords");
+  for (const r of [symptoms, postopContext, ambiguous, patterns, nonSymptomWords]) if (typeof r === "string") return { ok: false, error: r };
   if ((symptoms as string[]).length === 0) return { ok: false, error: "symptoms가 비어 있습니다" };
   if ((postopContext as string[]).length === 0) return { ok: false, error: "postopContext가 비어 있습니다" };
   for (const p of patterns as string[]) {
@@ -92,8 +100,23 @@ export function parseRedflagConfig(json: unknown): ConfigResult {
       postopContextPatterns: patterns as string[],
       feverThresholdCelsius: t,
       ambiguous: ambiguous as string[],
+      nonSymptomWords: nonSymptomWords as string[],
     },
   };
+}
+
+/**
+ * nonSymptomWords를 같은 길이의 기호(□)로 바꾼다. 기호는 어절 글자가 아니므로(isWordChar) 뒤 글자는
+ * 첫머리로 읽히고, 가린 자리 안에서 증상어가 새로 생기지 않는다. "두피에서 피가 나요"의 두 번째 "피가"는 그대로 남는다.
+ */
+function hideNonSymptomWords(text: string, words: string[]): string {
+  let out = text.normalize("NFKC");
+  for (const w of words) {
+    const nw = w.normalize("NFKC");
+    if (nw === "") continue;
+    out = out.split(nw).join("□".repeat([...nw].length));
+  }
+  return out;
 }
 
 /** 비교용 정규화: NFKC + 소문자 + 공백 전부 제거. "숨 차요"와 "숨차요", "D + 3"과 "D+3"을 같게 본다. */
@@ -207,9 +230,10 @@ function findPatterns(text: string, patterns: string[]): string[] {
  */
 export function checkRedflags(text: string, config: RedflagConfig): RedflagResult {
   const norm = normalizeWithBoundaries(text);
-  const matchedSymptoms = [...findTerms(norm, config.symptoms)];
+  const hidden = normalizeWithBoundaries(hideNonSymptomWords(text, config.nonSymptomWords));
+  const matchedSymptoms = [...findTerms(hidden, config.symptoms)];
   for (const f of findFever(text, config.feverThresholdCelsius)) if (!matchedSymptoms.includes(f)) matchedSymptoms.push(f);
-  const matchedAmbiguous = findTerms(norm, config.ambiguous);
+  const matchedAmbiguous = findTerms(hidden, config.ambiguous);
   const matchedContext = [...findTerms(norm, config.postopContext), ...findPatterns(text, config.postopContextPatterns)];
   const hasCtx = matchedContext.length > 0;
 
