@@ -30,7 +30,7 @@ describe("가짜 녹화 → 녹화 형식 파서", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.servedModels).toEqual([FAKE_MODEL]);
-    expect(r.value.inquiries).toHaveLength(40);
+    expect(r.value.inquiries).toHaveLength(41);
     // 사내 Q&A 녹화는 직원 질문 문항만.
     expect(r.value.golden.map((g) => g.id)).toEqual(golden.filter((g) => g.kind === "staff-qa").map((g) => g.id));
   });
@@ -185,7 +185,7 @@ describe("번들 생성", () => {
     expect(realBundle().recordingSource).toBe("none");
     const b = realBundle(await fakeJson(), "fake-fixture");
     expect(b.recordingSource).toBe("fake-fixture");
-    expect(b.recording?.inquiries).toHaveLength(40);
+    expect(b.recording?.inquiries).toHaveLength(41);
     expect(b.recordingIssues).toEqual([]);
   });
 

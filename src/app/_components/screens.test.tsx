@@ -38,6 +38,18 @@ describe("통합 목록 첫 화면", () => {
     expect(iQ25).toBeLessThan(iQ01);
     expect(html).not.toContain("/inquiry/Q08"); // 접힌 적신호
   });
+
+  it("30초 시연 0~5초: 확정 대기 맨 앞은 시한이 지난 Q41, 요약과 받은 기간은 데이터에서 계산한 값", () => {
+    const iQ41 = html.indexOf("/inquiry/Q41");
+    expect(iQ41).toBeGreaterThan(html.indexOf("/inquiry/Q25"));
+    expect(iQ41).toBeLessThan(html.indexOf("/inquiry/Q01"));
+    expect(html).toContain("예약금 받음 · 확정 연락 시한 1일 19시간 지남");
+    expect(html).toContain("예약금 받음 · 확정 대기 4건 · 시한 지남 1");
+    expect(html).toContain("9/18(금) 16:40~9/21(월) 09:40에 받은 합성 문의");
+    // 대본의 '주황 칸': 행은 확정 대기 묶음 색(g2 주황), 배지만 시한 지남 빨강
+    expect(html).toContain('class="item g2" href="/inquiry/Q41"');
+    expect(html).toContain('<span class="badge red">예약금 받음 · 확정 연락 시한 1일 19시간 지남</span>');
+  });
 });
 
 describe("문의 상세", () => {
@@ -60,6 +72,14 @@ describe("문의 상세", () => {
     const html = renderToStaticMarkup(<InquiryDetail id="Q01" />);
     expect(html.indexOf("예약금 받음 · 확정 대기")).toBeLessThan(html.indexOf("경과일: 문의에 적힌 값 없음"));
     expect(html).toContain("안내할 때 근거 규정");
+  });
+
+  it("예약금 문의(Q41): 시한이 지났으면 확정 대기 카드가 경보 색이고 지난 시간을 적는다", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q41" />);
+    expect(html).toContain('class="card alert"');
+    expect(html).toContain("9/19(토) 15:00까지");
+    expect(html).toContain("시한 1일 19시간 지남");
+    expect(html).not.toContain("0분 남음");
   });
 
   // 미리 만든 AI 답이 들어오면 미리보기 대신 초안의 가격 칸이 보인다. 그때는 이 시험을 건너뛴다.

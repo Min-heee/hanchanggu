@@ -9,7 +9,7 @@ import { readPostopDay } from "../core/postop";
 import { analyzeInquiry, analyzeStaffQuestion } from "./analyze";
 import { DEMO_NOW, DEMO_NOW_MS, formatDuration, formatKst, kstParts, kstToMs } from "./clock";
 import { computeMetrics, metricValue } from "./evaluation";
-import { buildInboxItem, deadlineBadge, filterInbox, filterOptions, inboxRows, inboxSummary, KIND_LABEL, sortInbox, STATUS_LABEL, type LocalMarks } from "./inbox";
+import { buildInboxItem, deadlineBadge, filterInbox, filterOptions, inboxRows, inboxSummary, KIND_LABEL, receivedRangeText, sortInbox, STATUS_LABEL, type LocalMarks } from "./inbox";
 import { confirmDeadlineMs, FALLBACK_CONFIRM_BUSINESS_DAYS, isOpenAt, readConfirmPolicy, readHandoverPolicy } from "./policy";
 import { realBundle, realKnowledge } from "./__fixtures__/real";
 
@@ -102,8 +102,8 @@ describe("통합 목록(F3) — 녹화 없음", () => {
       ...["Q06", "Q07", "Q08", "Q09", "Q11", "Q13", "Q14", "Q16", "Q19", "Q22", "Q24", "Q26", "Q27", "Q32", "Q35", "Q36"],
       // 약 문의 인계(MED-01). 5분 시한의 인계라 주차·리뷰 문의 아래에 묻히면 안 된다.
       "Q25",
-      // 예약금 받음·미확정
-      ...["Q01", "Q15", "Q31"],
+      // 예약금 받음·미확정. Q41은 금요일에 받아 가장 오래 기다렸다(시한 지남).
+      ...["Q41", "Q01", "Q15", "Q31"],
       ...["Q02", "Q03", "Q04", "Q05", "Q10", "Q12", "Q17", "Q18", "Q20", "Q21", "Q23", "Q28", "Q29", "Q30", "Q33", "Q34", "Q37", "Q38", "Q39", "Q40"],
     ]);
     expect(items().find((i) => i.id === "Q25")!.group).toBe(1);
@@ -138,7 +138,7 @@ describe("통합 목록(F3) — 녹화 없음", () => {
     expect(q06.waitMinutes).toBe(36 * 60 + 46);
   });
 
-  it("확정 대기(F16): 시한은 월 19:00, 기준 시각엔 아직 남았다", () => {
+  it("확정 대기(F16): 주말에 받은 건은 시한이 월 19:00이라 기준 시각엔 아직 남았다", () => {
     const q01 = items().find((i) => i.id === "Q01")!;
     expect(q01.deposit).toEqual({
       deadlineMs: kstToMs(2026, 9, 21, 19),
@@ -146,6 +146,17 @@ describe("통합 목록(F3) — 녹화 없음", () => {
       remainingMinutes: 9 * 60,
       overdue: false,
       bookingAtMs: Date.parse("2026-09-25T11:00:00+09:00"),
+    });
+  });
+
+  it("확정 대기(F16): 금 16:40(진료 중)에 받은 Q41은 시한이 토 15:00이라 기준 시각에 1일 19시간 지났다", () => {
+    const q41 = items().find((i) => i.id === "Q41")!;
+    expect(q41.deposit).toEqual({
+      deadlineMs: kstToMs(2026, 9, 19, 15),
+      elapsedMinutes: 2 * 1440 + 17 * 60 + 20,
+      remainingMinutes: -(43 * 60),
+      overdue: true,
+      bookingAtMs: Date.parse("2026-10-08T19:30:00+09:00"),
     });
   });
 
@@ -161,8 +172,8 @@ describe("통합 목록(F3) — 녹화 없음", () => {
     const all = items();
     const opts = filterOptions(all);
     expect(new Set(opts.channels)).toEqual(new Set(["kakao", "naver_talktalk", "instagram_dm", "web_form", "landing_form", "booking_note", "phone_memo", "sms", "review", "youtube_comment"]));
-    expect(filterInbox(all, { channel: "booking_note", kind: null, status: null }).map((i) => i.id)).toEqual(["Q27", "Q01", "Q15", "Q31"]);
-    expect(filterInbox(all, { channel: "booking_note", kind: "deposit", status: null }).map((i) => i.id)).toEqual(["Q01", "Q15", "Q31"]);
+    expect(filterInbox(all, { channel: "booking_note", kind: null, status: null }).map((i) => i.id)).toEqual(["Q27", "Q41", "Q01", "Q15", "Q31"]);
+    expect(filterInbox(all, { channel: "booking_note", kind: "deposit", status: null }).map((i) => i.id)).toEqual(["Q41", "Q01", "Q15", "Q31"]);
     expect(filterInbox(all, { channel: null, kind: null, status: "handover-needed" })).toHaveLength(17);
   });
 
@@ -171,6 +182,8 @@ describe("통합 목록(F3) — 녹화 없음", () => {
     // Q06: 토 21:14 받음 → 21:19 시한 → 월 10:00 = 1일 12시간 41분 지남(하루가 넘으면 분은 버림).
     expect(deadlineBadge(by.get("Q06")!, DEMO_NOW_MS)).toEqual({ tone: "red", text: "인계 시한 1일 12시간 지남" });
     expect(deadlineBadge(by.get("Q01")!, DEMO_NOW_MS)).toEqual({ tone: "orange", text: "예약금 받음 · 확정 연락 9시간 남음" });
+    // Q41: 금 16:40 받음 → 토 15:00 시한 → 월 10:00 = 43시간 지남(30초 시연 0~5초 장면의 배지).
+    expect(deadlineBadge(by.get("Q41")!, DEMO_NOW_MS)).toEqual({ tone: "red", text: "예약금 받음 · 확정 연락 시한 1일 19시간 지남" });
     expect(deadlineBadge(by.get("Q02")!, DEMO_NOW_MS)).toBeNull();
     const texts = items()
       .filter((i) => i.group === 0)
@@ -178,26 +191,31 @@ describe("통합 목록(F3) — 녹화 없음", () => {
     expect(new Set(texts).size).toBeGreaterThan(8);
   });
 
-  it("요약: 적신호 16(시한 지남 16), 약·분류 인계 1, 확정 대기 3(가장 가까운 시한 9시간)", () => {
+  it("요약: 적신호 16(시한 지남 16), 약·분류 인계 1, 확정 대기 4(시한 지남 1, 남은 것 중 가장 가까운 시한 9시간)", () => {
     expect(inboxSummary(items())).toEqual({
       redflag: 16,
       redflagOverdue: 16,
       otherHandover: 1,
       otherHandoverOverdue: 1,
-      deposit: 3,
-      depositOverdue: 0,
+      deposit: 4,
+      depositOverdue: 1,
       nextDepositMinutes: 9 * 60,
-      total: 40,
+      total: 41,
     });
     // 발송한 건은 할 일에서 빠진다.
     expect(inboxSummary(items({ sent: new Set(["Q06"]), handedOver: new Map() })).redflag).toBe(15);
   });
 
+  it("목록 머리의 받은 기간은 데이터에서 계산한다(가장 이른 Q41 ~ 가장 늦은 Q40)", () => {
+    expect(receivedRangeText(items())).toBe("9/18(금) 16:40~9/21(월) 09:40");
+    expect(receivedRangeText([])).toBeNull();
+  });
+
   it("적신호 묶음은 접으면 2건만 보이고, 그 아래 약 인계·확정 대기가 바로 이어진다", () => {
     const rows = inboxRows(items(), { collapseRedflag: true });
     const firstTen = rows.slice(0, 10).map((r) => (r.type === "item" ? r.item.id : r.type === "more" ? `+${r.hidden}` : r.text));
-    expect(firstTen).toEqual(["적신호 인계", "Q06", "Q07", "+14", "약·분류 인계", "Q25", "예약금 받음 · 확정 대기", "Q01", "Q15", "Q31"]);
-    expect(inboxRows(items(), { collapseRedflag: false }).filter((r) => r.type === "item")).toHaveLength(40);
+    expect(firstTen).toEqual(["적신호 인계", "Q06", "Q07", "+14", "약·분류 인계", "Q25", "예약금 받음 · 확정 대기", "Q41", "Q01", "Q15"]);
+    expect(inboxRows(items(), { collapseRedflag: false }).filter((r) => r.type === "item")).toHaveLength(41);
   });
 });
 
@@ -226,7 +244,7 @@ describe("문의 분석(가림 → 게이트 → 경과일 → 검색)", () => {
     expect(r.retrieval.postopDay).toBeNull();
   });
 
-  it("문의의 경과일 읽기가 사람이 적은 값(meta.postopDayMentioned)과 40건 모두 같다", () => {
+  it("문의의 경과일 읽기가 사람이 적은 값(meta.postopDayMentioned)과 41건 모두 같다", () => {
     const diff = bundle.inquiries
       .map((q) => ({ id: q.id, read: readPostopDay(q.text)?.days ?? null, label: q.meta.postopDayMentioned ?? null }))
       .filter((x) => x.read !== x.label);
@@ -259,7 +277,7 @@ describe("평가 탭(F15) — 녹화 없음", () => {
 
   it("규칙·검색 지표는 바로 계산한다", () => {
     expect([m("redflag-miss").numerator, m("redflag-miss").denominator, m("redflag-miss").pass]).toEqual([0, 15, true]);
-    expect([m("over-handover").numerator, m("over-handover").denominator]).toEqual([1, 24]);
+    expect([m("over-handover").numerator, m("over-handover").denominator]).toEqual([1, 25]);
     expect(m("over-handover").failures.map((f) => f.id)).toEqual(["Q24"]);
     // scripts/eval-retrieval.ts의 '문단@5 40/42'와 같아야 한다(같은 retrieve).
     expect([m("retrieval-hit").numerator, m("retrieval-hit").denominator]).toEqual([40, 42]);

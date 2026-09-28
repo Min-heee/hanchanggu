@@ -14,7 +14,7 @@ export default function Home() {
         </p>
         <nav aria-label="30초 둘러보기" className="tour">
           <span className="muted small">30초 둘러보기:</span>
-          <a href="#inbox">① 적신호 목록</a>
+          <a href="#inbox">① 통합 목록</a>
           <Link href="/inquiry/Q02">② 가격 문의</Link>
           <a href="#tryit">③ 직접 해 보기</a>
           <Link href="/qa?q=G16">④ 사내 Q&amp;A</Link>

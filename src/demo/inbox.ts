@@ -294,6 +294,16 @@ export function inboxSummary(items: InboxItem[]): InboxSummary {
   };
 }
 
+/**
+ * 목록 머리에 적는 '문의를 받은 기간'("9/18(금) 16:40~9/21(월) 09:40"). 데이터에서 계산한다 —
+ * 문의를 더하거나 받은 시각을 고쳐도 화면 문구가 따라오게(손으로 적어 두면 데이터와 어긋난다). 문의가 없으면 null.
+ */
+export function receivedRangeText(items: InboxItem[]): string | null {
+  if (items.length === 0) return null;
+  const ms = items.map((i) => i.receivedMs);
+  return `${formatKst(Math.min(...ms))}~${formatKst(Math.max(...ms))}`;
+}
+
 export type InboxRow =
   | { type: "title"; key: string; text: string }
   | { type: "item"; key: string; item: InboxItem }

@@ -16,6 +16,7 @@ import {
   inboxRows,
   inboxSummary,
   KIND_LABEL,
+  receivedRangeText,
   sortInbox,
   STATUS_LABEL,
   type InboxFilter,
@@ -50,6 +51,7 @@ export function Inbox() {
   const opts = filterOptions(items);
   const shown = filterInbox(items, filter);
   const sum = inboxSummary(items);
+  const range = receivedRangeText(items);
   const filtered = filter.channel !== null || filter.kind !== null || filter.status !== null;
   // 적신호는 앞 2건만 보이고 접는다 — 노트북 첫 화면에 약 인계·확정 대기 묶음까지 들어오게.
   const rows = inboxRows(shown, { collapseRedflag: !expanded && !filtered });
@@ -59,7 +61,7 @@ export function Inbox() {
     <section aria-labelledby="inbox-title" id="inbox">
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h2 id="inbox-title">통합 목록 · {items.length}건</h2>
-        <span className="small muted wide-only">창구 {opts.channels.length}곳 · 주말(토 18:10~월 09:40)에 쌓인 합성 문의</span>
+        <span className="small muted wide-only">창구 {opts.channels.length}곳 · {range ? `${range}에 받은 ` : ""}합성 문의</span>
       </div>
       <div className="row summary-row">
         <button type="button" className="summary red" onClick={() => pick("redflag")}>
