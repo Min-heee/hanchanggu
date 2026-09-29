@@ -69,7 +69,7 @@ export function readHandoverPolicy(chunks: Chunk[]): HandoverPolicy {
   };
 }
 
-/** 그날(KST 날짜)의 진료 시간. 휴진이면 null. 법정 공휴일 목록은 볼트에 없어 보지 않는다(README에 적음). */
+/** 그날(KST 날짜)의 진료 시간. 휴진이면 null. 법정 공휴일 목록은 볼트에 없어 보지 않는다(docs/DETAILS.md 한계에 적음). */
 export function openInterval(hours: Hours, year: number, month: number, day: number): { openMs: number; closeMs: number } | null {
   const base = kstToMs(year, month, day);
   const date = kstDate(base);
