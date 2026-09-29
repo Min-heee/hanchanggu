@@ -81,7 +81,7 @@ export async function recordInquiry(client: ClaudeClient, k: Knowledge, q: { id:
 
 /**
  * 과금 기준은 usage.iterations(시도별)다. 서버 측 대체가 일어나면 최상위 usage는 응답을 만든 시도만 담는다
- * (claude-api 스킬 문서). iterations가 있으면 그 합을, 없으면 최상위 값을 더한다.
+ * (Anthropic API 문서). iterations가 있으면 그 합을, 없으면 최상위 값을 더한다.
  */
 export function addUsage(total: Usage, u: UsageLike | null | undefined): void {
   if (!u) return;

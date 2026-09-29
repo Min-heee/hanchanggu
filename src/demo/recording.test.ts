@@ -179,7 +179,7 @@ describe("번들 생성", () => {
     const b = realBundle();
     expect(b.inquiries.every((q) => !("notes" in q.labels))).toBe(true);
     expect(b.golden.every((g) => !("notes" in g))).toBe(true);
-    expect(JSON.stringify(b)).not.toContain("실제 병원 공개 후기");
+    expect(JSON.stringify(b)).not.toContain('"notes":');
   });
 
   it("녹화 파일이 없으면 recording null, 있으면 형식을 확인해 넣는다", async () => {

@@ -1,5 +1,5 @@
 /**
- * 시연 모드용 응답 녹화(PRD F18). **키가 있을 때 오너가 직접 실행한다.** 방문자는 이 결과만 본다.
+ * 시연 모드용 응답 녹화(PRD F18). **키가 있을 때 저장소 주인이 직접 실행한다.** 방문자는 이 결과만 본다.
  *
  *   ANTHROPIC_API_KEY=... npm run record-demo            # 전부
  *   ANTHROPIC_API_KEY=... npm run record-demo -- --limit 3   # 앞 3건씩만(비용 확인용)
