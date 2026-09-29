@@ -36,7 +36,7 @@ describe("classifyInquiry — 요청 모양", () => {
     const inquiry = "예약금 냈는데 확정 연락이 없어요";
     await classifyInquiry(client, { channel: "kakao", maskedText: inquiry });
     const p = (create.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
-    expect(p.model).toBe("claude-opus-5");
+    expect(p.model).toBe("claude-sonnet-5-5");
     // 상수와 비교하지 않고 글자 그대로 적는다: 상수가 틀리면(06-01 등) 모든 호출이 400이다.
     expect(p.betas).toEqual(["server-side-fallback-2026-07-01"]);
     expect(p.fallbacks).toBe("default");
@@ -61,7 +61,7 @@ describe("classifyInquiry — 결과", () => {
     const { client } = mockClient(
       reply([
         { type: "text", text: "{\"category\":", citations: null },
-        { type: "fallback", from: { model: "claude-opus-5" }, to: { model: "claude-opus-4-8" } },
+        { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: "claude-opus-4-8" } },
         jsonText(good),
       ]),
     );

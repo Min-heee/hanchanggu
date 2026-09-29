@@ -60,16 +60,16 @@ describe("머리 띠", () => {
   });
 
   it("AI 답이 있으면 모델과 생성 날짜(KST)를 쓴다 — UTC 날짜를 잘라 쓰면 KST 오전 생성이 전날로 보인다", async () => {
-    const rec = { ...(await fakeRecording()), generatedAt: "2026-09-29T23:30:00.000Z", servedModels: ["claude-opus-5"] };
+    const rec = { ...(await fakeRecording()), generatedAt: "2026-09-29T23:30:00.000Z", servedModels: ["claude-sonnet-5-5"] };
     const t = bandText({ recording: rec, recordingSource: "file" });
     expect(t.main).toBe("가상 의원 · 합성 데이터 · 미리 만든 AI 답");
-    expect(t.ai).toBe("claude-opus-5 · 2026-09-30 생성");
+    expect(t.ai).toBe("claude-sonnet-5-5 · 2026-09-30 생성");
   });
 
   it("가짜 AI 답은 표시하고, ③ 설명도 'AI 응답'이라 부르지 않는다", () => {
     expect(bandText({ recording: null, recordingSource: "fake-fixture" }).fake).toBe(true);
     expect(draftSourceLabel("fake-fixture", "fake-fixture", false)).toContain("시험용 가짜 초안(모델 호출 없음)");
-    expect(draftSourceLabel("file", "claude-opus-5", true)).toBe("미리 만든 AI 답 · claude-opus-5 (대체 모델이 답함)");
+    expect(draftSourceLabel("file", "claude-sonnet-5-5", true)).toBe("미리 만든 AI 답 · claude-sonnet-5-5 (대체 모델이 답함)");
   });
 });
 

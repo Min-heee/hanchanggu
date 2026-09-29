@@ -57,7 +57,7 @@ describe("generateDraft — 요청 모양", () => {
     const { client, create } = mockClient(message([{ type: "text", text: "D+3부터 감을 수 있습니다.", citations: [citeD3] }]));
     await generateDraft(client, input());
     const params = (create.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
-    expect(params.model).toBe("claude-opus-5");
+    expect(params.model).toBe("claude-sonnet-5-5");
     // 글자 그대로: 헤더가 fallbacks 형식과 어긋나면 모든 호출이 400이다.
     expect(params.betas).toEqual(["server-side-fallback-2026-07-01"]);
     expect(params.fallbacks).toBe("default");
@@ -173,7 +173,7 @@ describe("finalTextBlocks — 서버 측 대체", () => {
   it("마지막 fallback 블록 뒤의 text 블록만 쓴다", () => {
     const content = [
       { type: "text", text: "거절 전 일부", citations: null },
-      { type: "fallback", from: { model: "claude-opus-5" }, to: { model: "claude-opus-4-8" } },
+      { type: "fallback", from: { model: "claude-sonnet-5-5" }, to: { model: "claude-opus-4-8" } },
       { type: "thinking", thinking: "", signature: "x" },
       { type: "text", text: "대체 모델 답", citations: null },
     ] as unknown as Anthropic.Beta.BetaContentBlock[];
