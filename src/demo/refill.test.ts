@@ -1,6 +1,8 @@
 /**
  * 녹화된 초안을 지금 코드로 다시 채우기(refill.ts)와, 그와 함께 더한 평가 행 시험.
- * 2회차 녹화(data/demo-responses.json, 커밋됨)를 그대로 읽는다 — 고치려던 결함이 그 녹화에서 나왔기 때문이다.
+ * 2회차 녹화의 사본(__fixtures__/recording-round2.json, 커밋 3430ae2의 data/demo-responses.json과 같은 바이트)을 읽는다.
+ * 고치려던 결함이 그 녹화에서 나왔기 때문이다. 시연 녹화(data/demo-responses.json)는 3회차부터 새 코드로 만들어져
+ * 다시 채울 것이 없으므로, 그 파일을 읽으면 "고친 것이 녹화에서 온 문제"라는 사실을 고정할 수 없다.
  */
 
 import { readFileSync } from "node:fs";
@@ -16,7 +18,7 @@ import { draftDisplay, type DraftMode } from "./refill";
 import { realBundle, realInputs, realKnowledge, ROOT } from "./__fixtures__/real";
 
 const k = realKnowledge();
-const recJson = JSON.parse(readFileSync(join(ROOT, "data/demo-responses.json"), "utf8")) as unknown;
+const recJson = JSON.parse(readFileSync(join(ROOT, "src/demo/__fixtures__/recording-round2.json"), "utf8")) as unknown;
 const parsed = parseDemoRecording(recJson);
 if (!parsed.ok) throw new Error(parsed.errors.join("\n"));
 const rec: DemoRecording = parsed.value;
