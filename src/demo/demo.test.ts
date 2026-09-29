@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { verifyCitations } from "../core/citations";
 import { MIN_TOP_SCORE, retrieve } from "../core/retrieve";
 import { readPostopDay } from "../core/postop";
 import { analyzeInquiry, analyzeStaffQuestion } from "./analyze";
@@ -92,6 +93,58 @@ describe("규정 읽기(볼트 V04·V12·V02)", () => {
     ["목 22:00 → 금 10/16 임시 휴진 → 토", kstToMs(2026, 10, 15, 22), kstToMs(2026, 10, 17, 15)],
   ])("확정 연락 시한(1영업일): %s", (_, received, deadline) => {
     expect(confirmDeadlineMs(k.hours, received, 1)).toBe(deadline);
+  });
+});
+
+describe("V13 인사·맺음 허용 목록(1회차 녹화 문장)", () => {
+  // 인용 없는 문장 하나만 넣어 실제 볼트의 허용 목록으로 판정한다. 허용 목록은 사실이 전혀 없는 인사·감사만 받는다.
+  // (문장 하나만 넣은 초안 자체는 no-cited로 보류되므로 초안 상태가 아니라 문장 종류를 본다.)
+  const kindOf = (text: string) => verifyCitations([{ type: "text", text, citations: null }], [], k.allowedDocIds, k.tone).sentences[0].kind;
+
+  it("사실 없는 감사는 허용: 요청해 주셔서 감사합니다.", () => {
+    // 1회차에서 이 한 문장 때문에 Q41 초안 전체가 보류됐다.
+    expect(kindOf("요청해 주셔서 감사합니다.")).toBe("allowlisted");
+  });
+
+  it.each([
+    // 예/아니요·가능 여부·결론은 사실이다. 허용 목록으로 풀지 않고 프롬프트로 인용을 붙이게 한다(llm/draft.ts 규칙 1·4).
+    "아니요, 신청만으로는 확정되지 않습니다.",
+    "아니요, 안내하면 안 됩니다.",
+    "언급하면 안 됩니다.",
+    "따라서 의료진 확인이 필요합니다.",
+    // 모델이 날짜를 추론한 문장. 보류가 맞다.
+    "요청하신 10월 1일(목)은 이 범위에 해당합니다.",
+    // 연결 문장은 사실은 아니지만 인사도 아니다. 허용 목록을 넓히지 않고 쓰지 않게 한다(규칙 9).
+    "처리 방법은 다음과 같습니다.",
+    "환자에게는 이렇게 안내하시면 됩니다.",
+    // 행동 요청 — '그 시간에 상담이 된다'는 뜻이 섞인다.
+    "원하시는 상담 날짜와 시간이 있으면 알려 주세요.",
+    // 적대 검증(2026-09-29): 안 된다는 답으로 읽혀 거절 결론을 인용 없이 전한다(Q20에서 한 번 넣었다가 뺐다).
+    "양해 부탁드립니다.",
+  ])("사실·결론·요청이 섞인 문장은 계속 막는다: %s", (text) => {
+    expect(kindOf(text)).toBe("uncited");
+  });
+
+  it("허용 목록 전체를 글자 그대로 고정한다(문구를 더하면 사람이 이 목록을 고쳐야 한다)", () => {
+    // 목록에 든 문장은 인용·숫자 대조 없이 나간다. 한 줄이 늘 때마다 리뷰에 드러나게 한다(변이 시험 V5~V10).
+    expect([...k.tone.greetings, ...k.tone.closings]).toEqual([
+      "안녕하세요, 샘플의원입니다.",
+      "문의 주셔서 감사합니다.",
+      "안녕하세요, 샘플의원 상담 담당입니다.",
+      "기다리게 해 드려 죄송합니다.",
+      "요청해 주셔서 감사합니다.",
+      "더 궁금하신 점이 있으면 편하게 문의해 주세요.",
+      "감사합니다.",
+      "확인한 뒤 다시 연락드리겠습니다.",
+      "샘플의원 드림",
+    ]);
+  });
+
+  it("허용 목록에는 숫자·자리표시자·예/아니요·가능 여부가 없다", () => {
+    // 한글 뒤에서는 \b가 듣지 않아 "아니요."를 놓친다. 그래서 (?![가-힣])로 낱말 끝을 본다.
+    for (const s of [...k.tone.greetings, ...k.tone.closings]) {
+      expect(s).not.toMatch(/[0-9０-９]|\{\{|^\s*(네|예|아니요|아니오)(?![가-힣])|가능|불가|안 됩니다|됩니다|확정|해당|양해/);
+    }
   });
 });
 

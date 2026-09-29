@@ -13,11 +13,15 @@
  * 공백 정규화 규칙(인사·맺음 허용 목록 대조): NFKC, 연속 공백을 하나로, 앞뒤 공백 제거,
  *   끝의 문장부호(. ! ? ~ 。 …)와 공백 제거 후 완전 일치.
  * 글자 수를 셀 때(이음말 길이): NFKC 후 문자·숫자(\p{L}\p{N})만 센다. 공백·문장부호·자리표시자는 세지 않는다.
+ * 초안 단위: 인용 문장이나 자리표시자 문장이 하나도 없으면(인사·맺음만) 보류한다(no-cited). 허용 목록 문장은 인용 없이
+ *   나가므로, 그것만으로 된 초안이 통과하면 "양해 부탁드립니다" 같은 인사가 거절·수락 결론을 대신 전할 수 있다.
  *
  * 인용 대조가 보장하는 것과 못 하는 것:
  *   - 보장: cited_text가 우리가 보낸 원문에 글자 그대로 있다(인용 원문 불일치 0건).
  *   - 근사: 모델 문장이 그 원문과 같은 말인지는 2-gram 겹침 비율(MIN_CITED_OVERLAP)과 숫자 대조로만 본다.
  *     겹침이 낮으면 보류하지만, 겹치면서 뜻을 뒤집는 문장("~해도 됩니다" ↔ "~하면 안 됩니다")은 못 잡는다.
+ *   - 못 함: 6자 이하 이음말의 "네, "·"아니요, "가 인용 문장과 맞는 답인지. 1회차 녹화에서 통과한 답(G02·G03)이
+ *     이 모양이라 막지 않았다 — 인용 문장이 그 예/아니요를 뒷받침하는지는 보내는 사람이 본다.
  *     그래서 보내는 사람이 문장마다 원문을 확인한다(PRD 9절 환각).
  */
 
@@ -30,6 +34,11 @@ export const NO_EVIDENCE_MARKER = "[근거 없음]";
 /**
  * 근거가 있는 문장 안에서 인용 없는 이음말로 허용하는 최대 글자 수(문자·숫자만, 자리표시자 제외).
  * "네, ", "또한 " 정도만 들어가게 작게 둔다. 20자였을 때는 ", 음주·사우나도 바로 괜찮습니다" 같은 절 하나가 통째로 들어갔다.
+ * 글자 수만으로는 6자 안에 든 사실(", 당일도 됩니다", ", 즉 목요일부터", " ⭕")을 못 막아서 TAIL_FACT_WORDS·기호 검사를 함께 한다.
+ * 1회차 녹화(2026-09-29)에서 이 상한에 걸린 5건(9·9·13·13·19자)은 모두 이음말이 아니라 사실 조각이었다 —
+ * 조건("휴진일과 진료시간 밖:"), 주어("다른 약과 함께 먹어도 되는지는"), 날짜 추론("목요일이 D+7이면 토요일은 D+9여서").
+ * 9자로 올리면 조건·주어가 든 2건이, 19자면 날짜 추론까지 인용 없이 풀린다. 그래서 올리지 않고 프롬프트(llm/draft.ts 규칙 10)로
+ * 문서 문장을 통째로 인용하게 했다.
  */
 export const UNCITED_TAIL_MAX_CHARS = 6;
 
@@ -91,7 +100,8 @@ export type HoldCode =
   | "uncited-sentence"
   | "uncited-tail"
   | "unsupported-number"
-  | "low-overlap";
+  | "low-overlap"
+  | "no-cited";
 
 export interface HoldReason {
   code: HoldCode;
@@ -253,11 +263,32 @@ export function koreanNumeralsToDigits(s: string): string {
   return out.replace(NATIVE_COUNT_RE, (_m, w: string) => NATIVE_COUNT[w]);
 }
 
-function numbersIn(s: string): string[] {
-  return (koreanNumeralsToDigits(s.replace(PLACEHOLDER, " ").normalize("NFKC")).match(/\d[\d,]*/g) ?? [])
-    .map((n) => n.replace(/,/g, ""))
-    .filter((n) => n !== "");
+/**
+ * 한자 숫자(五日)와 한자어 수로 쓴 금액(삼만원, 오천 원)은 숫자로 바꾸지 않고 그대로 '수 토큰'으로 센다.
+ * 인용 원문은 아라비아 숫자로 쓰므로, 모델이 이렇게 쓰면 원문에 없는 수로 걸린다 — 숫자 대조를 글자 바꾸기로 피해 가지 못하게.
+ * 한자어 수 전체(일·이·삼…)를 수로 보지 않는 이유: '일'(하루·업무)·'이'(이것)·'사'가 보통 낱말에 너무 흔하다.
+ * 금액은 십·백·천·만·억이 들고 '원'으로 끝날 때만 잡는다(병원·의원·사원은 걸리지 않는다).
+ */
+const HANJA_NUMERAL_RE = /[〇零一二三四五六七八九十百千萬万億兩]+/g;
+// 앞 글자가 한글이면 수가 아니다("불만 원인"의 '만 원').
+const SINO_PRICE_RE = /(?<![가-힣])(?:[일이삼사오육칠팔구]?[십백천만억])+\s*원/g;
+
+export function numbersIn(s: string): string[] {
+  const t = koreanNumeralsToDigits(s.replace(PLACEHOLDER, " ").normalize("NFKC"));
+  const digits = (t.match(/\d[\d,]*/g) ?? []).map((n) => n.replace(/,/g, "")).filter((n) => n !== "");
+  const words = [...(t.match(HANJA_NUMERAL_RE) ?? []), ...(t.match(SINO_PRICE_RE) ?? []).map((w) => w.replace(/\s+/g, ""))];
+  return [...digits, ...words];
 }
+
+/**
+ * 인용 밖 이음말(6자 이하)과 자리표시자 문장의 주어에 있으면 안 되는 말: 가능 여부, 날짜·요일, 값 비교.
+ * 이런 말은 인용 블록 안에 있어야 한다 — 짧아도 결론이다(", 당일도 됩니다", " {{price:…}}의 반값입니다").
+ * 1회차 녹화에서 통과한 인용 문장에 쓰인 이 말은 모두 인용 원문에도 있었다(원문 밖에서 쓴 것은 이미 보류된 Q34 날짜 추론뿐).
+ * 녹화에는 블록 경계가 남지 않아, 원문에 있는 말을 모델이 이음말 쪽에 두었는지는 2회차 녹화에서 확인한다.
+ */
+const TAIL_FACT_WORDS = /가능|불가|안\s*돼|안\s*됩|됩니다|돼요|됨|어렵|당일|반값|무료|공짜|할인|확정|해당|요일|내일|모레|오늘|주말|평일|이번\s*주|다음\s*주/;
+/** 기호로 쓴 결론(⭕ ❌ ✅ ○ ×)은 글자 수에 안 잡히므로 따로 막는다. */
+const TAIL_SYMBOLS = /[\p{So}\p{Extended_Pictographic}○◯×✕✗✘]/u;
 
 /** 문자·숫자만 남긴다(자리표시자 제외). 이음말 길이와 겹침 비율에 쓴다. */
 function lettersOnly(s: string): string {
@@ -296,7 +327,11 @@ function fitsTemplateFrame(sentence: string): boolean {
   if (!TEMPLATE_FRAME.test(t)) return false;
   // 자리표시자 앞의 조각(주어 + 조사 + 이음말) 하나하나가 짧아야 한다. 마지막 조각은 맺음("입니다.")이다.
   const parts = t.split("§");
-  return parts.slice(0, -1).every((part) => [...part.replace(/[^\p{L}]/gu, "")].length <= TEMPLATE_PART_MAX_LETTERS);
+  // 주어에 가능 여부·날짜("당일 예약 가능 시간은")나 한글로 쓴 수를 끼우면 값은 문서에서 와도 문장은 모델의 주장이 된다.
+  return parts.every((part, i) => {
+    if (TAIL_FACT_WORDS.test(part) || numbersIn(part).length > 0) return false;
+    return i === parts.length - 1 || [...part.replace(/[^\p{L}]/gu, "")].length <= TEMPLATE_PART_MAX_LETTERS;
+  });
 }
 
 /**
@@ -365,9 +400,18 @@ export function verifyCitations(
         .map((sp) => full.slice(Math.max(sp.start, start), Math.min(sp.end, end)))
         .join("");
       const tailLen = [...lettersOnly(uncited)].length;
+      const factWord = TAIL_FACT_WORDS.exec(uncited.replace(PLACEHOLDER, " ").normalize("NFKC"))?.[0] ?? null;
+      const symbol = TAIL_SYMBOLS.exec(uncited)?.[0] ?? null;
       if (tailLen > UNCITED_TAIL_MAX_CHARS) {
         problems.push("uncited-tail");
         reasons.push({ code: "uncited-tail", sentenceIndex: index, detail: `인용 밖 이음말이 ${tailLen}자입니다(최대 ${UNCITED_TAIL_MAX_CHARS}자)` });
+      } else if (factWord !== null || symbol !== null) {
+        problems.push("uncited-tail");
+        reasons.push({
+          code: "uncited-tail",
+          sentenceIndex: index,
+          detail: `인용 밖 이음말에 결론을 뜻하는 ${factWord !== null ? `말("${factWord}")` : `기호("${symbol}")`}이 있습니다`,
+        });
       }
       // 인용 블록마다 모델 문장이 인용 원문과 겹치는지 본다. 인용만 붙이고 딴말을 하는 문장을 막는다.
       for (const sp of overlapping.filter((x) => x.valid.length > 0)) {
@@ -404,6 +448,12 @@ export function verifyCitations(
     }
     sentences.push({ index, text, start, end, kind, citations, problems });
   });
+
+  // 문장마다 통과해도 사실을 담은 문장(인용·자리표시자)이 하나도 없으면 막는다. 이 경우 모델은 사실상 근거를 찾지 못한 것이라,
+  // '[근거 없음]' 대신 허용 인사로만 채운 답이 '문서 빈칸' 보류를 건너뛰고 나가지 않게 한다.
+  if (reasons.length === 0 && !sentences.some((s) => s.kind === "cited" || s.kind === "template")) {
+    reasons.push({ code: "no-cited", sentenceIndex: null, detail: "문서를 인용한 문장이 없습니다(인사·맺음 문장뿐)" });
+  }
 
   return { status: reasons.length > 0 ? "hold" : "ok", reasons, sentences, text: full };
 }

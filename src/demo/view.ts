@@ -423,6 +423,7 @@ export const HOLD_TEXT: Record<string, string> = {
   "uncited-tail": "근거 밖 말이 김",
   "unsupported-number": "원문에 없는 숫자",
   "low-overlap": "근거와 겹치는 말이 적음",
+  "no-cited": "인용한 문장 없음 — 인사·맺음뿐",
   refusal: "모델 거절",
   truncated: "응답 잘림",
   template: "가격·시간 칸 오류",

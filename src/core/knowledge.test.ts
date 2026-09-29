@@ -33,6 +33,12 @@ describe("buildKnowledge", () => {
     expect(buildKnowledge(loadVault(files))).toEqual({ ok: false, errors: ["V17 terms가 빈 값 없는 문자열 배열이 아닙니다"] });
   });
 
+  it("인사·맺음 허용 목록(V13)이 깨지면 빈 목록으로 넘어가지 않고 멈춘다", () => {
+    // 변이 시험(2026-09-29): V13 파싱 실패를 빈 목록으로 삼키는 변이가 살아남았다. 빈 목록 쪽 판정이 뒤집히면 전부 허용이 된다.
+    const files = fixtureFiles().map((f) => (f.path === "cs-tone-guide.md" ? { ...f, raw: f.raw.replace('"greetings"', '"greetingz"') } : f));
+    expect(buildKnowledge(loadVault(files))).toEqual({ ok: false, errors: ["V13 greetings가 빈 값 없는 문자열 배열이 아닙니다"] });
+  });
+
   it("json 문서가 미승인이면 값을 쓰지 않는다", () => {
     const files = fixtureFiles().map((f) => (f.path === "price-list.md" ? { ...f, raw: f.raw.replace("status: approved", "status: draft") } : f));
     const r = buildKnowledge(loadVault(files));
