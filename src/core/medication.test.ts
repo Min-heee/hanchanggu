@@ -8,6 +8,9 @@ describe("parseMedicationConfig", () => {
     expect(parseMedicationConfig({ terms: ["약을"], exclude: [] })).toEqual({ ok: true, config: { terms: ["약을"], exclude: [] } });
     expect(parseMedicationConfig({ terms: [], exclude: [] })).toEqual({ ok: false, error: "V17 terms가 비어 있습니다" });
     expect(parseMedicationConfig({ terms: ["약을"] }).ok).toBe(false);
+    // 직원 질문 앞세우기에서만 빼는 말(qaPinIgnore)은 선택이다. 있으면 빈 값 없는 문자열 배열이어야 한다.
+    expect(parseMedicationConfig({ terms: ["약을"], exclude: [], qaPinIgnore: ["약도"] })).toEqual({ ok: true, config: { terms: ["약을"], exclude: [], qaPinIgnore: ["약도"] } });
+    expect(parseMedicationConfig({ terms: ["약을"], exclude: [], qaPinIgnore: [""] }).ok).toBe(false);
     expect(parseMedicationConfig({ terms: ["약을", ""], exclude: [] }).ok).toBe(false);
     expect(parseMedicationConfig([]).ok).toBe(false);
   });

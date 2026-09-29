@@ -90,3 +90,26 @@ describe("문의 상세", () => {
     expect(html).toContain("AI 초안은 아직 준비 전입니다");
   });
 });
+
+// 녹화 파일의 보낼 글은 녹화 때 채운 것이다. 화면은 AI가 쓴 글에 지금 코드로 칸을 다시 채워 보인다(src/demo/refill.ts).
+describe.skipIf(bundle.recordingSource !== "file")("미리 만든 AI 답 — 지금 코드로 다시 채운 글", () => {
+  const textarea = (html: string) => /<textarea[^>]*>([^<]*)<\/textarea>/.exec(html)?.[1] ?? "";
+  const sentences = (html: string) => [...html.matchAll(/<p class="sentence[^"]*">(.*?)<\/p>/g)].map((m) => m[1].replace(/<[^>]+>/g, ""));
+
+  it("가격 문의(Q02): 승인 패널·초안 문장에 단위 겹침이 없고, 다시 채웠다고 적고 녹화 때 글도 펼쳐 볼 수 있다", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q02" />);
+    expect(textarea(html)).toContain("모발이식은 모당 2,000원이며");
+    expect(textarea(html)).toContain("예약금 30,000원을 받습니다");
+    expect(textarea(html)).not.toMatch(/원\/(?:모|회)/);
+    expect(sentences(html).join(" ")).not.toMatch(/원\/(?:모|회)/);
+    expect(html).toContain("지금 코드로 다시 채운 글");
+    expect(html).toContain("미리 만든 답을 만들 때 채운 글");
+  });
+
+  it("환자 답장(Q38): 링크 표기 대신 문서 제목, 환자가 열 수 없는 문서 이름이라고 알린다", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q38" />);
+    expect(textarea(html)).not.toContain("[[");
+    expect(sentences(html).join(" ")).not.toContain("[[");
+    expect(html).toContain("환자가 열어 볼 수 없는 병원 문서 이름");
+  });
+});

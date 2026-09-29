@@ -13,6 +13,7 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Knowledge } from "../core/knowledge";
 import { NO_EVIDENCE_MARKER } from "../core/citations";
+import { formatWon, type PriceItem } from "../core/template";
 import type { ClaudeClient } from "../llm/client";
 import { recordAll } from "./record";
 import type { DemoRecording } from "./recording";
@@ -61,8 +62,31 @@ function fakeClassify(inquiry: string) {
   return { category, priority: "normal", handover: false, evidence, reason: "시험용 가짜 분류(모델 호출 없음)" };
 }
 
+/**
+ * 가격 칸 문장: 받은 가격표 문단(V03)에서 그 금액이 적힌 문장을 찾아, 금액만 자리표시자로 바꿔 그 문단을 인용한다.
+ * 가격 칸은 인용 문장 안에서만 받으므로(core/citations.ts, core/pricecheck.ts) 진짜 모델에게 시키는 모양과 같게 만든다.
+ * 가격표 문단을 받지 못했으면 가격 문장을 쓰지 않는다.
+ */
+function priceSentence(docs: DocBlock[], item: PriceItem | undefined): unknown | null {
+  if (!item) return null;
+  const amount = `${formatWon(item.price)}원`;
+  for (const [di, d] of docs.entries()) {
+    if (!d.title?.startsWith("V03 ")) continue;
+    for (const [bi, b] of d.source.content.entries()) {
+      const sentence = b.text.split(/(?<=[.?!])\s+/).find((s) => s.includes(amount));
+      if (!sentence) continue;
+      return {
+        type: "text",
+        text: sentence.replace(amount, `{{price:${item.key}}}`),
+        citations: [{ type: "content_block_location", cited_text: b.text, document_index: di, document_title: d.title, start_block_index: bi, end_block_index: bi + 1 }],
+      };
+    }
+  }
+  return null;
+}
+
 /** 요청 모양을 보고 분류 응답 또는 인용 달린 초안 응답을 돌려주는 모의 클라이언트. */
-export function fakeClient(tone: Knowledge["tone"]): ClaudeClient {
+export function fakeClient(tone: Knowledge["tone"], prices: PriceItem[] = []): ClaudeClient {
   const create = async (params: unknown) => {
     const p = params as { output_config?: { format?: unknown }; messages: { content: unknown }[] };
     if (p.output_config?.format) {
@@ -90,7 +114,8 @@ export function fakeClient(tone: Knowledge["tone"]): ClaudeClient {
       blocks.push({ type: "text", text: "\n", citations: null });
     });
     const price = PRICE_WORDS.find(([re]) => re.test(q));
-    if (price) blocks.push({ type: "text", text: `가격은 {{price:${price[1]}}}입니다.\n`, citations: null });
+    const priced = price ? priceSentence(docs, prices.find((x) => x.key === price[1])) : null;
+    if (priced) blocks.push(priced, { type: "text", text: "\n", citations: null });
     if (q.includes(HOLD_TRIGGER)) blocks.push({ type: "text", text: "관리를 받으면 누구나 금방 좋아집니다.\n", citations: null });
     blocks.push({ type: "text", text: tone.closings[0], citations: null });
     return message(blocks);
@@ -104,7 +129,7 @@ export async function buildFakeRecording(
   golden: { id: string; kind: "staff-qa" | "inquiry"; question?: string }[],
   vaultAsOf: string,
 ): Promise<DemoRecording> {
-  return recordAll(fakeClient(k.tone), k, inquiries, golden, {
+  return recordAll(fakeClient(k.tone, k.prices), k, inquiries, golden, {
     requestedModel: `${FAKE_MODEL}(시험용 가짜 녹화 — 모델 호출 없음)`,
     vaultAsOf,
     // 생성 시각을 고정해 번들이 실행마다 같게 한다.

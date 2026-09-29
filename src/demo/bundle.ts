@@ -45,6 +45,8 @@ const GoldenSchema = z.object({
   question: z.string().optional(),
   inquiryId: z.string().optional(),
   expectedDocs: z.array(z.string()),
+  /** 정답 문단을 가리키는 원문 조각(문서 ID + 그 문서 문단에 글자 그대로 있는 말). 문단 기준 검색 적중에 쓴다(data/README.md). */
+  expectedEvidence: z.array(z.object({ doc: z.string(), quote: z.string() })),
   mustHold: z.boolean(),
   holdReason: z.string().nullable(),
   mustHandover: z.boolean(),

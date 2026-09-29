@@ -115,8 +115,9 @@ export interface SentenceReport {
   start: number;
   end: number;
   /**
-   * cited: 인용 있음. allowlisted: V13 인사·맺음. template: 인용은 없지만 자리표시자({{price:…}}, {{hours}})를
-   * 담은 짧은 문장 — 값이 승인 문서 json에서 들어오므로 허용한다. uncited: 막힌 문장.
+   * cited: 인용 있음. allowlisted: V13 인사·맺음. template: 인용은 없지만 진료시간 자리표시자({{hours}})를
+   * 담은 짧은 문장 — 값이 승인 문서 json에서 들어오므로 허용한다. 가격 칸({{price:…}})은 인용 문장 안에서만 받는다
+   * (어느 항목 값인지 원문과 대조해야 해서, core/pricecheck.ts). uncited: 막힌 문장.
    */
   kind: "cited" | "allowlisted" | "template" | "uncited";
   citations: VerifiedCitation[];
@@ -322,7 +323,14 @@ const TEMPLATE_FRAME = new RegExp(
 /** 자리표시자 앞 조각(주어 + 조사 + 이음말)의 최대 글자 수. 주어 10자 안팎을 허용한다. */
 const TEMPLATE_PART_MAX_LETTERS = 13;
 
+/** 가격 자리표시자. 인용 없는 틀 문장에서는 받지 않는다(fitsTemplateFrame). */
+const PRICE_PLACEHOLDER = /\{\{\s*price:/;
+
 function fitsTemplateFrame(sentence: string): boolean {
+  // 가격 칸은 그 가격이 적힌 문서 문장을 인용한 문장 안에서만 받는다. 인용 없는 "두피 관리는 {{price:injection}}입니다."는
+  // 틀에 맞아도 어느 항목의 값인지 대조할 원문이 없다(3차 적대 검증 — 키를 잘못 고르면 다른 항목 금액이 나간다).
+  // 2회차 녹화의 통과 초안에는 이런 문장이 0개였다(자리표시자 문장 3개는 모두 {{hours}}). 진료시간은 값이 하나라 그대로 받는다.
+  if (PRICE_PLACEHOLDER.test(sentence)) return false;
   const t = sentence.normalize("NFKC").replace(PLACEHOLDER, "§").trim();
   if (!TEMPLATE_FRAME.test(t)) return false;
   // 자리표시자 앞의 조각(주어 + 조사 + 이음말) 하나하나가 짧아야 한다. 마지막 조각은 맺음("입니다.")이다.
@@ -442,7 +450,11 @@ export function verifyCitations(
       kind = "uncited";
       if (invalid.length === 0) {
         problems.push("uncited-sentence");
-        const why = PLACEHOLDER_TEST.test(text) ? " (자리표시자 문장이 허용 틀 '…는 {{…}}입니다'를 벗어났습니다)" : "";
+        const why = PRICE_PLACEHOLDER.test(text)
+          ? " (가격 자리표시자는 그 가격이 적힌 문서 문장을 인용한 문장 안에서만 씁니다)"
+          : PLACEHOLDER_TEST.test(text)
+            ? " (자리표시자 문장이 허용 틀 '…는 {{…}}입니다'를 벗어났습니다)"
+            : "";
         reasons.push({ code: "uncited-sentence", sentenceIndex: index, detail: `인용 없는 문장: "${text}"${why}` });
       }
     }

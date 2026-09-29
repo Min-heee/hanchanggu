@@ -15,6 +15,7 @@ import type { Fill } from "@/core/template";
 import { analyzeInquiry } from "@/demo/analyze";
 import { DEMO_NOW_MS, formatDuration, formatKst } from "@/demo/clock";
 import { buildInboxItem } from "@/demo/inbox";
+import { draftDisplay } from "@/demo/refill";
 import { addLog, sentTargets, templateChosenTargets } from "@/demo/state";
 import {
   CATEGORY_LABEL,
@@ -73,6 +74,8 @@ export function InquiryDetail({ id }: { id: string }) {
   const a = analyzeInquiry(k, q.channel, q.text, override);
   const inquiryAd = checkAdExpressions(q.text, k.ad);
   const draft = record?.draft ?? null;
+  // 보낼 글은 녹화의 모델 글을 지금 코드로 다시 채운 것이다(src/demo/refill.ts). 화면이 녹화 때 글과 다르면 그렇다고 적는다.
+  const display = draft ? draftDisplay(k, draft, "reply") : null;
   const drift = driftFor(id);
   const masked = maskedView(maskedCaseForInquiry(item.step, record, a.decision.mask));
 
@@ -89,10 +92,10 @@ export function InquiryDetail({ id }: { id: string }) {
 
   const pipeline = item.step === "classify" || item.step === "draft" || item.step === "shop-redirect" || (item.step === "hold" && draft);
   const live = a.retrieval ? retrievalView(k, a.retrieval, a.decision.mask.masked) : null;
-  const recorded = record?.retrieval ? recordedRetrievalView(k, { retrieval: record.retrieval, excludedMatches: record.excludedMatches ?? [] }, "reply", record.route.maskedText, record.postopDay) : null;
+  const recorded = record?.retrieval ? recordedRetrievalView(k, { retrieval: record.retrieval, excludedMatches: record.excludedMatches ?? [], retrievalMeta: record.retrievalMeta }, "reply", record.route.maskedText, record.postopDay) : null;
   const liveDiffers = recorded && live && live.items.map((x) => x.chunkId).join() !== recorded.items.map((x) => x.chunkId).join();
   const prices = !draft && live ? pricePreview(k, a.decision.mask.masked, live.items.map((x) => x.docId)) : [];
-  const fillSources = (draft?.fills ?? []).map((f) => {
+  const fillSources = (display?.fills ?? []).map((f) => {
     const c = fillSourceChunk(k, f);
     const chunk = c ? k.chunks.find((x) => x.chunkId === c) : undefined;
     return { fill: f, chunk: chunk ? { chunkId: chunk.chunkId, text: chunk.text } : null };
@@ -255,6 +258,7 @@ export function InquiryDetail({ id }: { id: string }) {
             <div className="sticky-col">
               <DraftPanel
                 draft={draft}
+                display={display}
                 sourceLabel={draft ? draftSourceLabel(bundle.recordingSource, draft.meta.model, draft.meta.servedByFallback) : ""}
                 onCite={cite}
                 onFill={onFill}
@@ -268,10 +272,10 @@ export function InquiryDetail({ id }: { id: string }) {
                       : "AI 초안은 아직 준비 전입니다 — 안전 규칙과 문서 찾기는 지금 동작합니다."
                 }
               />
-              <VerifyPanel draft={draft} fillSources={fillSources} highlight={highlight} />
+              <VerifyPanel draft={draft} display={display} fillSources={fillSources} highlight={highlight} />
             </div>
           </div>
-          {draft?.status === "ok" && draft.finalText && <ApprovePanel target={id} initialText={draft.finalText} replyMode={a.decision.replyMode} />}
+          {draft?.status === "ok" && display?.text && <ApprovePanel target={id} initialText={display.text} replyMode={a.decision.replyMode} />}
         </>
       )}
     </div>

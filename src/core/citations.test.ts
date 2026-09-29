@@ -85,10 +85,18 @@ describe("verifyCitations — 통과", () => {
     expect(r.status).toBe("ok");
   });
 
-  it("자리표시자 문장은 허용 틀('…는 {{…}}입니다')이면 인용이 없어도 'template'으로 허용한다", () => {
-    for (const text of ["상담비는 {{price:consult}}입니다.", "진료시간은 {{hours}}입니다", "상담비는 {{price:consult}}, 진단비는 {{price:diagnosis}}입니다.", "{{hours}}"]) {
+  it("진료시간 자리표시자 문장은 허용 틀('…는 {{hours}}입니다')이면 인용이 없어도 'template'으로 허용한다", () => {
+    for (const text of ["진료시간은 {{hours}}입니다", "{{hours}}", "진료시간은 {{hours}}예요."]) {
       const r = verifyCitations([t(text)], DOCS, ALLOWED, TONE);
       expect([text, r.status, r.sentences[0].kind]).toEqual([text, "ok", "template"]);
+    }
+  });
+
+  it("가격 칸은 인용 없는 틀 문장에서 받지 않는다 — 어느 항목 값인지 대조할 원문이 없다(3차 적대 검증: '두피 관리는 {{price:injection}}입니다.')", () => {
+    for (const text of ["상담비는 {{price:consult}}입니다.", "상담비는 {{price:consult}}, 진단비는 {{price:diagnosis}}입니다.", "진료시간은 {{hours}}, 상담비는 {{price:consult}}입니다."]) {
+      const r = verifyCitations([t(text)], DOCS, ALLOWED, TONE);
+      expect([text, r.status, r.sentences[0].kind]).toEqual([text, "hold", "uncited"]);
+      expect(r.reasons[0].detail).toContain("가격 자리표시자는 그 가격이 적힌 문서 문장을 인용한 문장 안에서만 씁니다");
     }
   });
 });

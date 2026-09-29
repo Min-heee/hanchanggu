@@ -43,15 +43,15 @@ fictional: true
 
 ```json
 [
-  { "key": "consult-first", "label": "첫 상담비", "price": 30000, "unit": "회", "note": "첫 방문 1회" },
+  { "key": "consult-first", "label": "첫 상담비", "price": 30000, "unit": null, "note": "첫 방문 1회" },
   { "key": "diagnosis", "label": "두피·모발 정밀 진단", "price": 50000, "unit": "회", "note": "확대 촬영과 결과 설명 포함" },
   { "key": "graft", "label": "모발이식 모당 단가", "price": 2000, "unit": "모", "note": "최소 500모, 최종 모수는 의료진 진찰 후 결정" },
   { "key": "injection", "label": "두피 주사 1회", "price": 120000, "unit": "회", "note": "회차 묶음 할인 없음" },
   { "key": "scalp-care", "label": "두피 관리 1회", "price": 80000, "unit": "회", "note": "약 60분" },
   { "key": "postop-visit", "label": "수술 후 정기 경과 진료", "price": 0, "unit": "회", "note": "수술 후 1년 안, 수술비에 포함" },
   { "key": "progress-photo", "label": "경과 사진 촬영", "price": 0, "unit": "회", "note": "수술·주사 프로그램 환자" },
-  { "key": "deposit-consult", "label": "첫 상담 예약금", "price": 30000, "unit": "회", "note": "방문 시 상담비로 전환" },
-  { "key": "deposit-surgery", "label": "수술 예약금", "price": 500000, "unit": "회", "note": "수술비에 포함" }
+  { "key": "deposit-consult", "label": "첫 상담 예약금", "price": 30000, "unit": null, "note": "방문 시 상담비로 전환" },
+  { "key": "deposit-surgery", "label": "수술 예약금", "price": 500000, "unit": null, "note": "수술비에 포함" }
 ]
 ```
 

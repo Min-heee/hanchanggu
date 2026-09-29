@@ -49,8 +49,10 @@ describe("가짜 녹화 → 녹화 형식 파서", () => {
     if (!r.ok) throw new Error(r.errors.join("\n"));
     const q02 = r.value.inquiries.find((q) => q.id === "Q02")!.draft!;
     expect(q02.status).toBe("ok");
-    expect(q02.fills).toEqual([{ placeholder: "{{price:graft}}", value: "2,000원/모", sourceDoc: "V03", key: "graft" }]);
-    expect(q02.finalText).toContain("2,000원/모");
+    // 가짜 모델은 가격표 문장("모발이식은 모당 2,000원이며…")의 금액만 칸으로 바꿔 인용한다. 같은 절에 "모당"이 있어 "/모"는 붙지 않는다.
+    expect(q02.fills).toEqual([{ placeholder: "{{price:graft}}", value: "2,000원", sourceDoc: "V03", key: "graft" }]);
+    expect(q02.finalText).toContain("모당 2,000원이며");
+    expect(q02.sentences.find((s) => s.text.includes("{{price:graft}}"))?.kind).toBe("cited");
     expect(q02.sentences.filter((s) => s.kind === "cited").every((s) => s.citations.length > 0)).toBe(true);
   });
 

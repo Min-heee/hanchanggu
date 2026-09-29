@@ -4,9 +4,10 @@
  * 시험(renderToStaticMarkup)으로 '제외됨' 표시 같은 화면 약속을 확인할 수 있다.
  */
 
-import type { Fill } from "@/core/template";
+import type { Fill, OutgoingPart } from "@/core/template";
 import type { DraftResult } from "@/llm/draft";
-import { HOLD_TEXT, type PricePreview, type RetrievalView, type Segment } from "@/demo/view";
+import type { DraftDisplay } from "@/demo/refill";
+import { HOLD_TEXT, PIN_LABEL, type PricePreview, type RetrievalView, type Segment } from "@/demo/view";
 
 function StepTitle({ n, children }: { n: string; children: React.ReactNode }) {
   return (
@@ -63,10 +64,13 @@ export function RetrievalPanel({ view, compare }: { view: RetrievalView; compare
                   {h.title}
                   {h.heading ? ` › ${h.heading}` : ""}
                 </span>
-                <span className={`badge ${h.relevance === "높음" ? "green" : h.relevance === "낮음" ? "gray" : h.relevance === "경과일 구간" ? "orange" : "blue"}`}>
+                <span
+                  className={`badge ${h.relevance === "높음" ? "green" : h.relevance === "낮음" ? "gray" : h.relevance === "경과일 구간" || h.relevance === "규칙으로 앞에 섬" ? "orange" : "blue"}`}
+                >
                   관련도 {h.relevance}
                 </span>
               </div>
+              {h.pin && <p className="small muted">{PIN_LABEL[h.pin]}</p>}
               <p className="small snippet">
                 <Marked segs={h.snippet} />
               </p>
@@ -110,6 +114,7 @@ export function RetrievalPanel({ view, compare }: { view: RetrievalView; compare
             <li key={h.chunkId}>
               {h.chunkId} · 점수 {h.score.toFixed(2)}
               {h.postopBoost ? " · 경과일 구간으로 앞에 섬" : ""}
+              {h.pin ? ` · 규칙으로 앞에 섬(${h.pin})` : ""}
             </li>
           ))}
           {view.excluded.map((e) => (
@@ -157,30 +162,36 @@ export function ExcerptPanel({ docs, highlight, source, weak = false }: { docs: 
   );
 }
 
-/** 문장 안의 자리표시자를 코드가 넣은 값으로 바꿔 보인다. 값은 초록 칸 — 누르면 가격표 문단이 칠해진다. */
-function withFills(text: string, fills: Fill[], onFill: (f: Fill) => void) {
-  const parts = text.split(/(\{\{[^{}]*\}\})/g);
-  return parts.map((p, i) => {
-    const f = fills.find((x) => x.placeholder === p);
-    if (!f) return <span key={i}>{p}</span>;
-    return (
-      <button key={i} type="button" className="fill" onClick={() => onFill(f)} aria-label={`${f.value} — ${f.sourceDoc === "V03" ? "가격표" : "진료시간"}에서 코드가 넣은 값, 원문 보기`}>
-        {f.value}
-      </button>
-    );
-  });
+/** 문장 조각을 그린다. 코드가 넣은 값은 초록 칸 — 누르면 가격표 문단이 칠해진다. 조각은 src/demo/refill.ts가 지금 코드로 채운 것이다. */
+function FilledParts({ parts, onFill }: { parts: OutgoingPart[]; onFill: (f: Fill) => void }) {
+  return (
+    <>
+      {parts.map((p, i) => {
+        const f = p.fill;
+        if (!f) return <span key={i}>{p.text}</span>;
+        return (
+          <button key={i} type="button" className="fill" onClick={() => onFill(f)} aria-label={`${f.value} — ${f.sourceDoc === "V03" ? "가격표" : "진료시간"}에서 코드가 넣은 값, 원문 보기`}>
+            {f.value}
+          </button>
+        );
+      })}
+    </>
+  );
 }
 
 const SENTENCE_KIND = { cited: "근거 있음", allowlisted: "인사·맺음", template: "가격·시간 칸", uncited: "근거 없음" } as const;
 
 export function DraftPanel({
   draft,
+  display,
   sourceLabel,
   onCite,
   onFill,
   notReadyText,
 }: {
   draft: DraftResult | null;
+  /** 지금 코드로 다시 채운 글(src/demo/refill.ts draftDisplay). */
+  display: DraftDisplay | null;
   sourceLabel: string;
   onCite: (chunkIds: string[]) => void;
   onFill: (f: Fill) => void;
@@ -201,6 +212,27 @@ export function DraftPanel({
     <section className="card" aria-label="③ AI 초안">
       <StepTitle n="3">AI 초안</StepTitle>
       <p className="small muted">{sourceLabel}. 문장 끝 번호를 누르면 ②에서 원문 문단이 칠해집니다.</p>
+      {display?.refilled && (
+        <div className="note small" role="note">
+          가격·시간 칸과 문서 이름은 <strong>지금 코드로 다시 채운 글</strong>입니다. AI가 쓴 문장(칸 이름·문서 링크)은 미리 만든 답 그대로이고, 채우는
+          규칙(단위·조사·문서 이름)을 고친 뒤라 그때 채운 글과 다릅니다.
+          <details>
+            <summary>미리 만든 답을 만들 때 채운 글</summary>
+            <p className="quote">{display.recordedText}</p>
+          </details>
+        </div>
+      )}
+      {display && display.errors.length > 0 && (
+        <div className="note warn small" role="note">
+          지금 가격표·진료시간으로 칸을 채우지 못해 보낼 글을 만들지 않습니다: {display.errors.join(", ")}
+        </div>
+      )}
+      {display && display.patientLinkTitles.length > 0 && (
+        <div className="note small" role="note">
+          환자가 열어 볼 수 없는 병원 문서 이름이 문장에 들어 있습니다({display.patientLinkTitles.map((t) => `‘${t}’`).join(", ")}). AI가 인용한 문서 문장에
+          링크로 있던 자리라 제목으로 바꿨습니다. 환자에게 필요 없으면 고쳐서 보내세요.
+        </div>
+      )}
       {draft.sentences.length === 0 ? (
         <p className="quote">{draft.modelText || (draft.status === "hold" ? "AI를 부르지 않았습니다." : "(빈 응답)")}</p>
       ) : (
@@ -209,7 +241,7 @@ export function DraftPanel({
             const ids = [...new Set(s.citations.flatMap((c) => c.chunkIds))];
             return (
               <p key={s.index} className={`sentence${s.problems.length > 0 ? " bad" : ""}`}>
-                {withFills(s.text, draft.fills, onFill)}
+                <FilledParts parts={display?.sentenceParts.get(s.index) ?? [{ text: s.text, fill: null }]} onFill={onFill} />
                 {ids.map((id) => (
                   <button key={id} type="button" className="cite" onClick={() => onCite([id])} aria-label={`근거 ${numOf(id)}번 문단 보기`}>
                     [{numOf(id)}]
@@ -232,7 +264,17 @@ export interface FillSource {
   chunk: { chunkId: string; text: string } | null;
 }
 
-export function VerifyPanel({ draft, fillSources, highlight }: { draft: DraftResult | null; fillSources: FillSource[]; highlight: ReadonlySet<string> }) {
+export function VerifyPanel({
+  draft,
+  display,
+  fillSources,
+  highlight,
+}: {
+  draft: DraftResult | null;
+  display: DraftDisplay | null;
+  fillSources: FillSource[];
+  highlight: ReadonlySet<string>;
+}) {
   return (
     <section className="card" aria-label="④ 근거·확인">
       <StepTitle n="4">근거·확인</StepTitle>
@@ -274,7 +316,7 @@ export function VerifyPanel({ draft, fillSources, highlight }: { draft: DraftRes
               </ul>
             </div>
           )}
-          <AdSignals hits={draft.adcheck?.hits ?? []} label="초안의 광고 표현 신호" />
+          <AdSignals hits={(display?.adcheck ?? draft.adcheck)?.hits ?? []} label="초안의 광고 표현 신호" />
           <p className="small muted">
             코드가 확인한 것: 근거로 단 글이 병원 문서 문단과 글자 그대로 같은지, 문장 속 숫자가 근거 원문에 있는지, 근거 없는 문장이 없는지. &lsquo;해도
             됩니다&rsquo;와 &lsquo;하면 안 됩니다&rsquo;처럼 뜻이 뒤집힌 문장은 코드가 잡지 못하므로 보내는 사람이 확인합니다.

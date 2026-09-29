@@ -158,6 +158,46 @@ describe("① 문서 찾기 뷰", () => {
     expect(gone.missing).toEqual(["V99#1"]);
   });
 
+  it("직원 질문에서 규칙으로 앞에 세운 문단은 '낮음' 대신 까닭을 보인다(3차 회귀 확인: G46 1~3위가 '관련도 낮음'으로 보였다)", () => {
+    const s = analyzeStaffQuestion(k, "수술 2주째 환자가 이식 부위에서 고름이 나온다는데 연고 바르라고 해도 돼요?");
+    const v = retrievalView(k, s.retrieval, s.mask.masked);
+    expect(v.items.slice(0, 3).map((i) => [i.chunkId, i.pin, i.relevance])).toEqual([
+      ["V11#4", "redflag", "규칙으로 앞에 섬"],
+      ["V17#1", "medication", "규칙으로 앞에 섬"],
+      ["V12#2", "handover", "규칙으로 앞에 섬"],
+    ]);
+    expect(relevanceLabel(20, false, "handover")).toBe("높음");
+  });
+
+  it("넓히기를 한 문의는 넓힌 말을 적고, 날짜·칸 이름을 뺀 것과 구분한다", () => {
+    const a = analyzeInquiry(k, "kakao", "이번 주 수요일 오후 3시 상담 예약을 다음 주로 미룰 수 있을까요?");
+    const note = retrievalView(k, a.retrieval!, a.decision.mask.masked).queryNote!;
+    expect(note).toContain("‘예약 변경’으로도 찾았습니다");
+    expect(note).toContain("근거 약함 판정은 넓히기 전 말로만 합니다");
+    // 날짜·시각을 뺐으므로 그 안내도 함께.
+    expect(note).toContain("날짜·시각·폼 칸 이름·가린 곳은 빼고 찾았습니다.");
+    // 날짜·칸 이름이 없고 넓히기만 한 직원 질문에는 넓히기 안내만.
+    const q = analyzeStaffQuestion(k, "방문 당일 오전에 예약 시간을 오후로 바꿔 달라는데 바꿔 줘도 돼요?");
+    expect(retrievalView(k, q.retrieval, q.mask.masked).queryNote).toMatch(/^문의의 말을 문서의 말로 넓혀/);
+  });
+
+  it("녹화에 검색 부가 정보가 있으면(3회차부터) 근거 약함·앞세움 표시를 녹화 때 판정대로 보인다", () => {
+    const v = recordedRetrievalView(
+      k,
+      { retrieval: [{ chunkId: "V04#4", score: 14.7, pin: null }, { chunkId: "V12#2", score: 3, pin: "handover" }], excludedMatches: [], retrievalMeta: { expandedWith: ["예약 변경"], topScore: 7.6, weak: true } },
+      "staff-qa",
+      "샴푸 바꿔도 돼요?",
+      null,
+    );
+    expect(v.weak).toBe(true);
+    expect(v.items.map((i) => [i.pin, i.relevance])).toEqual([
+      [null, "보통"],
+      ["handover", "규칙으로 앞에 섬"],
+    ]);
+    // 부가 정보가 없는 2회차 녹화는 전처럼 발췌 점수로 판정한다.
+    expect(recordedRetrievalView(k, { retrieval: [{ chunkId: "V04#4", score: 14.7 }], excludedMatches: [] }, "staff-qa", "x", null).weak).toBe(false);
+  });
+
   it.each([
     [25, false, "높음"],
     [12, false, "보통"],
@@ -192,9 +232,10 @@ describe("가격 칸(F9)", () => {
     const a = analyzeInquiry(k, q("Q02").channel, q("Q02").text);
     const p = pricePreview(k, a.decision.mask.masked, a.retrieval!.hits.map((h) => h.chunk.docId));
     expect(p.map((x) => [x.placeholder, x.value, x.chunkId])).toEqual([
-      ["{{price:consult-first}}", "30,000원/회", "V03#1"],
+      // 한 번만 받는 첫 상담비·예약금은 가격표에 단위가 없다(모당 단가만 "/모").
+      ["{{price:consult-first}}", "30,000원", "V03#1"],
       ["{{price:graft}}", "2,000원/모", "V03#2"],
-      ["{{price:deposit-consult}}", "30,000원/회", "V03#1"],
+      ["{{price:deposit-consult}}", "30,000원", "V03#1"],
     ]);
   });
 

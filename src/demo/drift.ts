@@ -9,12 +9,14 @@
  */
 
 import type { Knowledge } from "../core/knowledge";
+import { checkPriceCitations } from "../core/pricecheck";
 import { maskPii } from "../core/mask";
 import { readPostopDay } from "../core/postop";
 import { retrieve } from "../core/retrieve";
 import { decideRoute } from "../core/route";
 import type { DraftResult } from "../llm/draft";
 import type { DemoRecording } from "./recording";
+import { recompose, type DraftMode } from "./refill";
 
 export interface DriftIssue {
   /** 문의 ID(Q01) 또는 골든셋 질문 ID(G16). */
@@ -36,8 +38,26 @@ export function recordingDrift(
   const add = (target: string, message: string) => issues.push({ target, message });
   const chunkText = new Map(k.chunks.map((c) => [c.chunkId, c.text]));
 
-  const checkDraft = (target: string, draft: DraftResult | null) => {
+  const checkDraft = (target: string, draft: DraftResult | null, mode: DraftMode) => {
     if (!draft) return;
+    // 화면은 통과한 초안의 보낼 글을 지금 가격표·진료시간·문서 제목으로 다시 채운다(refill.ts). 채운 글이 녹화 때와 다른 것은
+    // 바뀜이 아니지만(모델 입력은 같다), 채우지 못하면 보낼 글이 없어지므로 알린다.
+    if (draft.status === "ok") {
+      const r = recompose(k, draft.modelText, mode);
+      if (!r.ok) add(target, `지금 가격표·진료시간으로 초안의 칸을 채울 수 없습니다(${r.errors.join(", ")})`);
+      else {
+        // 값 자체가 바뀌었나. 단위 표기("30,000원/회" → "30,000원")는 채우기 규칙이 바뀐 것이라 금액 숫자만 비교한다.
+        // 가격표 json만 고치면 문단 글은 그대로라 위의 문단 대조로는 잡히지 않는다(3차 적대 검증: 첫 상담비 40,000원으로 바꿔도 경고 0).
+        const digits = (v: string) => v.replace(/[^\d]/g, "");
+        r.fills.forEach((now, i) => {
+          const then = draft.fills[i];
+          if (!then || then.placeholder !== now.placeholder) return;
+          const changed = now.sourceDoc === "V03" ? digits(then.value) !== digits(now.value) : then.value !== now.value;
+          if (changed) add(target, `녹화 뒤 ${now.sourceDoc === "V03" ? "가격표" : "진료시간"} 값이 바뀌었습니다(${now.placeholder}: 그때 ${then.value} → 지금 ${now.value})`);
+        });
+        for (const p of checkPriceCitations(draft.sentences, k.prices)) add(target, `지금 가격표 금액이 초안이 인용한 원문과 어긋납니다(${p.detail})`);
+      }
+    }
     for (const d of draft.documents) {
       if (!k.allowedDocIds.has(d.docId)) add(target, `초안이 쓴 문서 ${d.docId}는 지금 검색 대상(승인된 최신판)이 아닙니다`);
       for (const b of d.blocks) {
@@ -66,7 +86,7 @@ export function recordingDrift(
       const live = retrieve(k.index, "reply", masked, postop).hits.map((h) => h.chunk.chunkId);
       if (!sameOrder(live, r.retrieval.map((h) => h.chunkId))) add(r.id, "문서 찾기(①) 결과가 그때와 다릅니다");
     }
-    checkDraft(r.id, r.draft);
+    checkDraft(r.id, r.draft, "reply");
   }
 
   for (const g of rec.golden) {
@@ -80,7 +100,7 @@ export function recordingDrift(
     if (masked !== g.maskedQuestion) add(g.id, "AI가 받은 글(개인정보 가림 결과)이 지금과 다릅니다");
     const live = retrieve(k.index, "staff-qa", masked).hits.map((h) => h.chunk.chunkId);
     if (!sameOrder(live, g.retrieval.map((h) => h.chunkId))) add(g.id, "문서 찾기(①) 결과가 그때와 다릅니다");
-    checkDraft(g.id, g.draft);
+    checkDraft(g.id, g.draft, "staff-qa");
   }
   return issues;
 }

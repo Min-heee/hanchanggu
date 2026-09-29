@@ -12,17 +12,18 @@
 import { maskPii, type MaskResult } from "../core/mask";
 import type { Knowledge } from "../core/knowledge";
 import { RULE_DESCRIPTION, type RuleId } from "../core/redflag";
-import { MIN_TOP_SCORE, retrieve, type Retrieval } from "../core/retrieve";
+import { MIN_TOP_SCORE, retrieve, type PinReason, type Retrieval } from "../core/retrieve";
 import type { RouteDecision, RouteStep } from "../core/route";
 import { tokenize } from "../core/search";
 import { formatWon, renderPrice, type Fill } from "../core/template";
+import { linkTitlesOf, renderWikiLinks } from "../core/wikilink";
 import type { ExcludeReason } from "../core/vault";
 import type { DraftResult } from "../llm/draft";
 import { formatDuration, formatKst, kstDate, minutesBetween } from "./clock";
 import type { HandoverInfo } from "./inbox";
 import type { HandoverPolicy } from "./policy";
 import type { Bundle } from "./bundle";
-import type { GoldenRecord, InquiryRecord } from "./recording";
+import type { GoldenRecord, InquiryRecord, RecordedHit, RetrievalMeta } from "./recording";
 
 // ─── 머리 띠 ─────────────────────────────────────────────────────────────
 
@@ -150,11 +151,16 @@ export function staffOriginal(text: string): string {
 
 // ─── ① 검색 ──────────────────────────────────────────────────────────────
 
-export type Relevance = "높음" | "보통" | "낮음" | "경과일 구간";
+export type Relevance = "높음" | "보통" | "낮음" | "경과일 구간" | "규칙으로 앞에 섬";
 
-/** 점수를 직원이 읽는 말로. 기준(MIN_TOP_SCORE)은 PRD F7 근거 약함 기준과 같은 값이다. */
-export function relevanceLabel(score: number, postopBoost = false): Relevance {
+/**
+ * 점수를 직원이 읽는 말로. 기준(MIN_TOP_SCORE)은 PRD F7 근거 약함 기준과 같은 값이다.
+ * 규칙으로 앞에 세운 문단(경과일 구간, 직원 질문의 적신호·약·인계 절차, 날짜 세는 기준)은 점수가 낮아도 '낮음'이 아니라
+ * 앞에 선 까닭을 보인다 — '관련도 낮음' 문단이 1~3위에 있으면 직원이 검색을 잘못 읽는다(3차 회귀 확인, G46).
+ */
+export function relevanceLabel(score: number, postopBoost = false, pin: PinReason | null = null): Relevance {
   if (postopBoost && score < MIN_TOP_SCORE) return "경과일 구간";
+  if (pin !== null && score < MIN_TOP_SCORE) return "규칙으로 앞에 섬";
   if (score >= MIN_TOP_SCORE * 2) return "높음";
   if (score >= MIN_TOP_SCORE) return "보통";
   return "낮음";
@@ -221,10 +227,9 @@ export function snippet(segs: Segment[], max = 90): Segment[] {
   return out;
 }
 
-/** 문서 속 `[[postop-care]]` 링크를 문서 제목으로. 병원 사람에게 파일 이름은 뜻이 없다. */
+/** 문서 속 `[[postop-care]]` 링크를 문서 제목으로(직원이 읽는 글). 병원 사람에게 파일 이름은 뜻이 없다. 규칙은 core/wikilink.ts. */
 export function replaceWikiLinks(text: string, k: Pick<Knowledge, "vault">): string {
-  const byFile = new Map(k.vault.all.map((d) => [d.path.replace(/^.*\//, "").replace(/\.md$/, ""), d.meta.title]));
-  return text.replace(/\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]/g, (whole, file: string, alias?: string) => alias ?? `‘${byFile.get(file.trim()) ?? file.trim()}’`);
+  return renderWikiLinks(text, linkTitlesOf(k.vault), "staff");
 }
 
 export const EXCLUDE_LABEL: Record<ExcludeReason, string> = {
@@ -234,6 +239,14 @@ export const EXCLUDE_LABEL: Record<ExcludeReason, string> = {
   "not-yet-effective": "시행 전",
 };
 
+/** 앞에 세운 까닭을 직원이 읽는 말로(core/retrieve.ts 규칙 3·4). */
+export const PIN_LABEL: Record<PinReason, string> = {
+  redflag: "질문에 적신호 말이 있어 적신호 기준 문단을 앞에 둠",
+  medication: "질문에 약 말이 있어 약 문의 원칙 문단을 앞에 둠",
+  handover: "적신호·약 질문이라 의료진 인계 절차 문단을 앞에 둠",
+  "day-base": "날짜 구간 문단과 함께 날짜 세는 기준(D+0) 문단을 보냄",
+};
+
 export interface RetrievalItem {
   chunkId: string;
   docId: string;
@@ -241,6 +254,8 @@ export interface RetrievalItem {
   heading: string | null;
   relevance: Relevance;
   postopBoost: boolean;
+  /** 규칙으로 앞에 세운 까닭. 녹화에 없으면(2회차) null. */
+  pin: PinReason | null;
   snippet: Segment[];
   /** 개발자용: 점수. */
   score: number;
@@ -278,9 +293,19 @@ function excludedItem(k: Knowledge, docId: string, reason: ExcludeReason): Exclu
   return { docId, title: k.titles.get(docId) ?? docId, label: `제외됨 · ${EXCLUDE_LABEL[reason]}`, version: e?.version != null ? String(e.version) : null, supersededBy: e?.supersededBy ?? null };
 }
 
-function queryNote(mode: "reply" | "staff-qa", maskedText: string, query: string): string | null {
-  if (mode !== "reply") return null;
-  return query.replace(/\s+/g, "") !== maskedText.replace(/\s+/g, "") ? "날짜·시각·폼 칸 이름·가린 곳은 빼고 찾았습니다." : null;
+/** 넓히기로 질의 끝에 붙인 말을 뗀 질의(core/retrieve.ts expandQuery가 `${query} ${말들}`로 붙인다). */
+function baseQueryOf(query: string, expandedWith: string[]): string {
+  const tail = ` ${expandedWith.join(" ")}`;
+  return expandedWith.length > 0 && query.endsWith(tail) ? query.slice(0, -tail.length) : query;
+}
+
+function queryNote(mode: "reply" | "staff-qa", maskedText: string, query: string, expandedWith: string[]): string | null {
+  const notes: string[] = [];
+  if (mode === "reply" && baseQueryOf(query, expandedWith).replace(/\s+/g, "") !== maskedText.replace(/\s+/g, "")) notes.push("날짜·시각·폼 칸 이름·가린 곳은 빼고 찾았습니다.");
+  if (expandedWith.length > 0) {
+    notes.push(`문의의 말을 문서의 말로 넓혀 ${expandedWith.map((w) => `‘${w}’`).join("·")}으로도 찾았습니다(목록은 예약 규정 문서의 기계가 읽는 값). 근거 약함 판정은 넓히기 전 말로만 합니다.`);
+  }
+  return notes.length > 0 ? notes.join(" ") : null;
 }
 
 /** 방금 브라우저에서 돌린 검색 결과를 그릴 값으로. 제외 문서는 '질의에 걸린 것'만 보인다. */
@@ -293,14 +318,15 @@ export function retrievalView(k: Knowledge, r: Retrieval, maskedText: string): R
       docId: h.chunk.docId,
       title: k.titles.get(h.chunk.docId) ?? h.chunk.docId,
       heading: h.chunk.heading,
-      relevance: relevanceLabel(h.score, h.postopBoost),
+      relevance: relevanceLabel(h.score, h.postopBoost, h.pin),
       postopBoost: h.postopBoost,
+      pin: h.pin,
       snippet: snippet(highlightSegments(replaceWikiLinks(h.chunk.text, k), r.query, common)),
       score: h.score,
     })),
     excluded: r.excluded.filter((e) => e.matched).map((e) => excludedItem(k, e.doc.id, e.doc.reason)),
     weak: r.weak,
-    queryNote: queryNote(r.mode, maskedText, r.query),
+    queryNote: queryNote(r.mode, maskedText, r.query, r.expandedWith),
     query: r.query,
     postopDay: r.postopDay,
     missing: [],
@@ -310,13 +336,16 @@ export function retrievalView(k: Knowledge, r: Retrieval, maskedText: string): R
 /** 미리 만든 AI 답을 만들 때의 검색 결과(녹화)를 그릴 값으로. 문단 글은 지금 문서에서 찾는다. */
 export function recordedRetrievalView(
   k: Knowledge,
-  rec: { retrieval: { chunkId: string; score: number }[]; excludedMatches: { docId: string; reason: string }[] },
+  rec: { retrieval: RecordedHit[]; excludedMatches: { docId: string; reason: string }[]; retrievalMeta?: RetrievalMeta | null },
   mode: "reply" | "staff-qa",
   maskedText: string,
   postopDay: number | null,
 ): RetrievalView {
   // 질의는 녹화 때와 같은 함수로 다시 만든다(칠하기에만 쓴다). 순위·점수는 녹화 값 그대로.
+  // 넓히기는 녹화에 남은 것만 믿는다 — 2회차 녹화는 넓히기 전이라 지금 코드가 넓힌 말로 칠하면 그때 검색과 다른 말이 칠해진다.
   const again = retrieve(k.index, mode, maskedText, postopDay, 1);
+  const expandedWith = rec.retrievalMeta?.expandedWith ?? [];
+  const query = expandedWith.length > 0 ? again.query : baseQueryOf(again.query, again.expandedWith);
   const common = commonTerm(k);
   const byId = new Map(k.chunks.map((c) => [c.chunkId, c]));
   const missing: string[] = [];
@@ -333,9 +362,10 @@ export function recordedRetrievalView(
       docId: c.docId,
       title: k.titles.get(c.docId) ?? c.docId,
       heading: c.heading,
-      relevance: relevanceLabel(h.score),
-      postopBoost: false,
-      snippet: snippet(highlightSegments(replaceWikiLinks(c.text, k), again.query, common)),
+      relevance: relevanceLabel(h.score, h.postopBoost ?? false, h.pin ?? null),
+      postopBoost: h.postopBoost ?? false,
+      pin: h.pin ?? null,
+      snippet: snippet(highlightSegments(replaceWikiLinks(c.text, k), query, common)),
       score: h.score,
     });
   }
@@ -343,9 +373,10 @@ export function recordedRetrievalView(
     source: "recorded",
     items,
     excluded: rec.excludedMatches.map((e) => excludedItem(k, e.docId, e.reason as ExcludeReason)),
-    weak: top < MIN_TOP_SCORE,
-    queryNote: queryNote(mode, maskedText, again.query),
-    query: again.query,
+    // 3회차 녹화부터는 녹화 때 판정을 그대로 쓴다(근거 강도는 발췌 점수의 최댓값과 다를 수 있다). 2회차는 둘이 같았다.
+    weak: rec.retrievalMeta ? rec.retrievalMeta.weak : top < MIN_TOP_SCORE,
+    queryNote: queryNote(mode, maskedText, query, expandedWith),
+    query,
     postopDay: mode === "reply" ? postopDay : null,
     missing,
   };
@@ -427,6 +458,7 @@ export const HOLD_TEXT: Record<string, string> = {
   refusal: "모델 거절",
   truncated: "응답 잘림",
   template: "가격·시간 칸 오류",
+  "price-mismatch": "가격 칸이 인용한 원문 금액과 다름",
   "ad-banned": "금지 광고 표현",
   "api-error": "모델 호출 오류",
 };

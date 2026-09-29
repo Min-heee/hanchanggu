@@ -29,6 +29,7 @@ interface Golden {
   id: string;
   kind: "staff-qa" | "inquiry";
   expectedDocs: string[];
+  expectedEvidence: { doc: string; quote: string }[];
   mustHold: boolean;
   holdReason: string | null;
   mustHandover: boolean;
@@ -156,6 +157,25 @@ describe("골든셋", () => {
       }
     }
     expect(n).toBeGreaterThan(40);
+  });
+
+  it("expectedEvidence(정답 문단 조각)는 notes의 근거 조각과 같고, 각각 정답 문서의 문단 하나에 글자 그대로 있다", () => {
+    const chunks = vault.active.flatMap(chunkDoc);
+    const ns = (t: string) => t.replace(/\s+/g, "");
+    for (const g of golden) {
+      // 근거 없음 문항은 정답 문단이 없다.
+      if (g.expectedDocs.length === 0) {
+        expect([g.id, g.expectedEvidence]).toEqual([g.id, []]);
+        continue;
+      }
+      const fromNotes = [...new Map([...g.notes.matchAll(/(V\d{2}b?) '([^']+)'/g)].map((m) => [`${m[1]}|${m[2]}`, { doc: m[1], quote: m[2] }])).values()];
+      expect([g.id, g.expectedEvidence]).toEqual([g.id, fromNotes]);
+      for (const e of g.expectedEvidence) {
+        expect([g.id, e.doc, g.expectedDocs.includes(e.doc)]).toEqual([g.id, e.doc, true]);
+        const hit = chunks.filter((c) => c.docId === e.doc && ns(c.text).includes(ns(e.quote)));
+        expect([g.id, e.quote, hit.length]).toEqual([g.id, e.quote, 1]);
+      }
+    }
   });
 
   it("근거 없음 문항의 핵심어는 승인 문서에 없다", () => {

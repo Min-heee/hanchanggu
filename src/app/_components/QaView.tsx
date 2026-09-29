@@ -15,6 +15,7 @@ import { chunkDoc } from "@/core/vault";
 import { analyzeStaffQuestion } from "@/demo/analyze";
 import { DEMO_NOW_MS, formatKst } from "@/demo/clock";
 import { gapDecision, gapEntry, preparedFromParam } from "@/demo/qa";
+import { draftDisplay } from "@/demo/refill";
 import { addGap } from "@/demo/state";
 import {
   draftSourceLabel,
@@ -93,9 +94,11 @@ export function QaView() {
   const drift = asked?.goldenId ? driftFor(asked.goldenId) : [];
 
   const live = a ? retrievalView(k, a.retrieval, a.mask.masked) : null;
-  const recorded = rec ? recordedRetrievalView(k, { retrieval: rec.retrieval, excludedMatches: rec.excludedMatches }, "staff-qa", rec.maskedQuestion, null) : null;
+  const recorded = rec ? recordedRetrievalView(k, { retrieval: rec.retrieval, excludedMatches: rec.excludedMatches, retrievalMeta: rec.retrievalMeta }, "staff-qa", rec.maskedQuestion, null) : null;
   const liveDiffers = recorded && live && live.items.map((x) => x.chunkId).join() !== recorded.items.map((x) => x.chunkId).join();
-  const fillSources = (rec?.draft.fills ?? []).map((f) => {
+  // 읽는 글은 녹화의 모델 글을 지금 코드로 다시 채운 것이다(src/demo/refill.ts).
+  const display = rec ? draftDisplay(k, rec.draft, "staff-qa") : null;
+  const fillSources = (display?.fills ?? []).map((f) => {
     const c = fillSourceChunk(k, f);
     const chunk = c ? k.chunks.find((x) => x.chunkId === c) : undefined;
     return { fill: f, chunk: chunk ? { chunkId: chunk.chunkId, text: chunk.text } : null };
@@ -188,6 +191,7 @@ export function QaView() {
             <div className="sticky-col">
               <DraftPanel
                 draft={rec?.draft ?? null}
+                display={display}
                 sourceLabel={rec ? draftSourceLabel(bundle.recordingSource, rec.draft.meta.model, rec.draft.meta.servedByFallback) : ""}
                 onCite={(ids) => {
                   setHighlight(new Set(ids));
@@ -202,7 +206,7 @@ export function QaView() {
                       : "AI 초안은 아직 준비 전입니다 — 문서 찾기와 발췌는 지금 동작합니다."
                 }
               />
-              <VerifyPanel draft={rec?.draft ?? null} fillSources={fillSources} highlight={highlight} />
+              <VerifyPanel draft={rec?.draft ?? null} display={display} fillSources={fillSources} highlight={highlight} />
             </div>
           </div>
           {inGaps ? (

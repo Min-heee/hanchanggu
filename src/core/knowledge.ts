@@ -9,20 +9,34 @@ import { parseAdConfig, type AdConfig } from "./adcheck";
 import { parseToneConfig, type ToneConfig } from "./citations";
 import { parseMedicationConfig, type MedicationConfig } from "./medication";
 import { parseRedflagConfig, type RedflagConfig } from "./redflag";
+import { parseQuerySynonyms, stripSearchAlias, type QuerySynonym, type RetrievalIndex } from "./retrieve";
 import { parseChannelMap, parsePublicTemplates, type ChannelEntry, type PublicTemplate } from "./route";
-import { buildIndex, type SearchIndex } from "./search";
+import { buildIndex } from "./search";
 import { parseHours, parsePriceList, type Hours, type PriceItem } from "./template";
 import { activeJson, chunkDoc, type Chunk, type LoadedVault } from "./vault";
+import { approvedLinksOf, linkTitlesOf, type LinkTitles } from "./wikilink";
 
 /** 기계가 읽는 json이 있어야 하는 문서. */
 export const JSON_DOCS = { hours: "V02", prices: "V03", redflag: "V11", medication: "V17", tone: "V13", publicTemplates: "V14", ad: "V15", channels: "V19" } as const;
 
+/**
+ * 검색 순위 규칙(core/retrieve.ts)이 쓰는 문서.
+ * - handover: 직원 질문에 적신호·약 말이 있을 때 함께 앞에 세울 인계 절차 문서.
+ * - synonyms: 질의 넓히기(searchSynonyms) json을 둘 수 있는 문서. json이 없으면 넓히지 않는다 — 넓히기는 검색을 돕는 값이라
+ *   없어도 안전 판정이 비지 않는다(적신호 목록과 다르다). 있는데 깨졌으면 다른 json 문서처럼 멈춘다.
+ */
+export const SEARCH_DOCS = { handover: "V12", synonyms: "V04" } as const;
+
 export interface Knowledge {
   vault: LoadedVault;
   chunks: Chunk[];
-  index: SearchIndex;
+  index: RetrievalIndex;
   allowedDocIds: ReadonlySet<string>;
   titles: ReadonlyMap<string, string>;
+  /** 볼트 링크의 파일 이름 → 문서 제목(`[[booking-policy]]` → 예약 규정 제목). */
+  linkTitles: LinkTitles;
+  /** 환자 답장이 가리켜도 되는 문서(승인된 최신판)의 파일 이름. 이 밖을 가리키는 환자 글은 채우기에서 보류한다(core/template.ts). */
+  approvedLinks: ReadonlySet<string>;
   hours: Hours;
   prices: PriceItem[];
   redflag: RedflagConfig;
@@ -47,6 +61,22 @@ function read<T>(vault: LoadedVault, id: string, parse: (j: unknown) => { ok: tr
     return null;
   }
   return r.value;
+}
+
+function readSynonyms(vault: LoadedVault, errors: string[]): QuerySynonym[] {
+  const doc = vault.active.find((d) => d.meta.id === SEARCH_DOCS.synonyms);
+  if (!doc || !/^\s*```json/m.test(doc.source.slice(doc.bodyStart))) return [];
+  const j = activeJson(vault, SEARCH_DOCS.synonyms);
+  if (!j.ok) {
+    errors.push(j.error);
+    return [];
+  }
+  const r = parseQuerySynonyms(j.value, SEARCH_DOCS.synonyms);
+  if (!r.ok) {
+    errors.push(r.error);
+    return [];
+  }
+  return r.synonyms;
 }
 
 export function buildKnowledge(vault: LoadedVault): KnowledgeResult {
@@ -79,6 +109,8 @@ export function buildKnowledge(vault: LoadedVault): KnowledgeResult {
     return r.ok ? { ok: true, value: r.templates } : r;
   }, errors);
 
+  const synonyms = readSynonyms(vault, errors);
+
   if (errors.length > 0 || !hours || !prices || !redflag || !medication || !tone || !ad || !channels || !publicTemplates) return { ok: false, errors };
 
   const chunks = vault.active.flatMap(chunkDoc);
@@ -88,9 +120,18 @@ export function buildKnowledge(vault: LoadedVault): KnowledgeResult {
     knowledge: {
       vault,
       chunks,
-      index: buildIndex(chunks, excluded),
+      index: {
+        ...buildIndex(chunks, excluded),
+        rules: {
+          strengthIndex: buildIndex(chunks.map((c) => ({ ...c, heading: stripSearchAlias(c.heading) }))),
+          synonyms,
+          staffPins: { redflag, medication, redflagDocId: JSON_DOCS.redflag, handoverDocId: SEARCH_DOCS.handover, medicationDocId: JSON_DOCS.medication },
+        },
+      },
       allowedDocIds: new Set(vault.active.map((d) => d.meta.id)),
       titles: new Map(vault.all.map((d) => [d.meta.id, d.meta.title])),
+      linkTitles: linkTitlesOf(vault),
+      approvedLinks: approvedLinksOf(vault),
       hours,
       prices,
       redflag,

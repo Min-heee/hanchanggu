@@ -13,6 +13,12 @@ import { normalizeForMatch } from "./redflag";
 export interface MedicationConfig {
   terms: string[];
   exclude: string[];
+  /**
+   * 직원 질문(사내 Q&A)에서 약 문서를 발췌 앞에 세울 때는 세지 않는 말(core/retrieve.ts 규칙 3). 문의 게이트(인계)에는 쓰지 않는다.
+   * "약도"(지도), "먹어도"(점심 먹어도), "부작용"(광고 문구)은 약 이야기가 아닐 때도 흔해서, 이 말만으로 앞세우면 발췌 5칸 중
+   * 2칸이 약·인계 문서로 찬다(3차 적대 검증). 게이트는 애매하면 인계하는 쪽이 맞지만 발췌 칸은 한정돼 있어 기준을 달리 둔다.
+   */
+  qaPinIgnore?: string[];
 }
 
 export type MedicationConfigResult = { ok: true; config: MedicationConfig } | { ok: false; error: string };
@@ -32,7 +38,11 @@ export function parseMedicationConfig(json: unknown): MedicationConfigResult {
     }
   }
   if ((o.terms as string[]).length === 0) return { ok: false, error: "V17 terms가 비어 있습니다" };
-  return { ok: true, config: { terms: o.terms as string[], exclude: o.exclude as string[] } };
+  const ignore = o.qaPinIgnore;
+  if (ignore !== undefined && (!Array.isArray(ignore) || !ignore.every((x) => typeof x === "string" && x.trim() !== ""))) {
+    return { ok: false, error: "V17 qaPinIgnore가 빈 값 없는 문자열 배열이 아닙니다" };
+  }
+  return { ok: true, config: { terms: o.terms as string[], exclude: o.exclude as string[], ...(ignore !== undefined ? { qaPinIgnore: ignore as string[] } : {}) } };
 }
 
 export function checkMedication(text: string, config: MedicationConfig): MedicationResult {

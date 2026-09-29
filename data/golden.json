@@ -6,6 +6,12 @@
     "expectedDocs": [
       "V02"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V02",
+        "quote": "월요일부터 금요일까지 오전 10시부터 오후 7시까지 진료합니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -21,6 +27,12 @@
       "V02",
       "V05"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V02",
+        "quote": "목요일은 야간 진료가 있어 오후 9시까지 진료합니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -34,6 +46,12 @@
     "question": "토요일에도 수술해요?",
     "expectedDocs": [
       "V02"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V02",
+        "quote": "토요일에는 수술을 하지 않고 상담, 주사, 두피 관리, 수술 후 경과 진료만 합니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -50,6 +68,12 @@
       "V02",
       "V13"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V02",
+        "quote": "휴진일에 들어온 문의는 다음 진료일 오전에 순서대로 확인합니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -63,6 +87,16 @@
     "question": "점심시간이 언제예요? 그때 전화 받아요?",
     "expectedDocs": [
       "V02"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V02",
+        "quote": "점심시간은 오후 1시부터 2시까지입니다"
+      },
+      {
+        "doc": "V02",
+        "quote": "이 시간에는 접수와 전화 응대를 하지 않습니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -78,6 +112,12 @@
     "expectedDocs": [
       "V03"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V03",
+        "quote": "첫 상담비는 30,000원입니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -91,6 +131,12 @@
     "question": "두피 주사 1회 가격이 얼마예요?",
     "expectedDocs": [
       "V03"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V03",
+        "quote": "두피 주사는 1회 120,000원입니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -107,6 +153,16 @@
       "V03",
       "V07"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V03",
+        "quote": "따로 비용을 받지 않습니다"
+      },
+      {
+        "doc": "V07",
+        "quote": "수술 후 1년 안의 정기 경과 진료는 비용이 없습니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -120,6 +176,12 @@
     "question": "네이버 예약으로 신청만 하면 예약이 확정된 거예요?",
     "expectedDocs": [
       "V04"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V04",
+        "quote": "요청만으로 확정되지 않습니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -136,6 +198,16 @@
       "V04",
       "V21"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V04",
+        "quote": "확정 연락이 나가지 않은 건은 가장 먼저 처리합니다"
+      },
+      {
+        "doc": "V21",
+        "quote": "그다음 예약금을 냈는데 확정 연락을 받지 못한 건을 처리합니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -149,6 +221,12 @@
     "question": "환불 요청하면 며칠 안에 입금해 줘요?",
     "expectedDocs": [
       "V04"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V04",
+        "quote": "환불은 요청을 받은 날부터 3영업일 안에 입금한 계좌로 보냅니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -166,6 +244,12 @@
     "expectedDocs": [
       "V05"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V05",
+        "quote": "첫 상담은 진단을 포함해 약 60분 걸립니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -179,6 +263,12 @@
     "question": "첫 상담 올 때 뭘 준비해 오라고 안내해요?",
     "expectedDocs": [
       "V05"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V05",
+        "quote": "복용 중인 약과 영양제의 이름을 적어 오시도록 안내합니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -194,6 +284,12 @@
     "expectedDocs": [
       "V06"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V06",
+        "quote": "앞이 트인 옷(단추나 지퍼가 있는 옷)"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -207,6 +303,12 @@
     "question": "수술 끝나고 본인 차를 운전해서 가도 되냐고 물어요.",
     "expectedDocs": [
       "V06"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V06",
+        "quote": "수술 당일에는 직접 운전하지 말고 보호자와 함께 가거나 대중교통으로 귀가하도록 안내합니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -222,6 +324,12 @@
     "expectedDocs": [
       "V07"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V07",
+        "quote": "D+3부터 D+14까지는 하루 한 번, D+1 내원 때 안내받은 방법으로 머리를 감습니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -235,6 +343,12 @@
     "question": "수술 후 술은 언제부터 마셔도 된다고 안내해요?",
     "expectedDocs": [
       "V07"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V07",
+        "quote": "수술 후 최소 2주 동안은 술과 담배를 피하도록 안내합니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -250,6 +364,12 @@
     "expectedDocs": [
       "V07"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V07",
+        "quote": "캡모자처럼 머리에 맞는 모자는 D+7 내원 때 의료진이 확인한 뒤부터 씁니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -263,6 +383,12 @@
     "question": "두피 주사 프로그램은 몇 번, 어떤 간격으로 해요?",
     "expectedDocs": [
       "V08"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V08",
+        "quote": "2주 간격으로 10회 진행합니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -279,6 +405,12 @@
       "V09",
       "V03"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V09",
+        "quote": "한 번에 약 60분 걸립니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -292,6 +424,12 @@
     "question": "경과 사진은 어떤 각도로 몇 장 찍어요?",
     "expectedDocs": [
       "V10"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V10",
+        "quote": "정면, 정수리, 왼쪽, 오른쪽, 헤어라인 다섯 장을 같은 순서로 찍습니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -307,6 +445,16 @@
     "expectedDocs": [
       "V12"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V12",
+        "quote": "적신호 문의는 확인한 순간부터 5분 안에 인계합니다"
+      },
+      {
+        "doc": "V12",
+        "quote": "그날 담당 간호사에게 업무 메신저로 먼저 알리고"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -320,6 +468,12 @@
     "question": "의료진에게 인계한 뒤 환자에게는 뭐라고 보내요?",
     "expectedDocs": [
       "V12"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V12",
+        "quote": "보내 주신 내용은 의료진에게 바로 전달했습니다. 의료진이 확인한 뒤 직접 연락드리겠습니다."
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -335,6 +489,12 @@
     "expectedDocs": [
       "V14"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V14",
+        "quote": "고정 문구는 치료 내용, 방문 사실, 개인 상황을 언급하지 않습니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -348,6 +508,12 @@
     "question": "메신저로 받은 환자 사진은 언제 지워요?",
     "expectedDocs": [
       "V16"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V16",
+        "quote": "메신저와 업무용 기기에서는 30일 안에 지웁니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -363,6 +529,12 @@
     "expectedDocs": [
       "V19"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V19",
+        "quote": "카카오 채널은 통합 도구와 연결되어 있지 않아 복사해서 카카오 채널 관리자 화면에서 보냅니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -377,6 +549,12 @@
     "expectedDocs": [
       "V21"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V21",
+        "quote": "출근하면 통합 문의 목록을 열고 적신호 인계 건부터 확인합니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -390,6 +568,12 @@
     "inquiryId": "Q17",
     "expectedDocs": [
       "V04"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V04",
+        "quote": "예약 변경은 방문 1일 전 오후 6시까지 할 수 있고 예약금은 그대로 옮겨 갑니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -407,6 +591,12 @@
     "expectedDocs": [
       "V08"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V08",
+        "quote": "두피 주사 예정일 앞뒤 3일 안에서는 직원이 바로 날짜를 옮길 수 있습니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -421,6 +611,12 @@
     "expectedDocs": [
       "V07"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V07",
+        "quote": "D+7 내원은 D+6부터 D+9 사이에서 날짜를 옮길 수 있습니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -433,6 +629,7 @@
     "kind": "inquiry",
     "inquiryId": "Q18",
     "expectedDocs": [],
+    "expectedEvidence": [],
     "mustHold": true,
     "holdReason": "no-source",
     "mustHandover": false,
@@ -445,6 +642,7 @@
     "kind": "staff-qa",
     "question": "모발이식 수술도 실손보험 적용돼요?",
     "expectedDocs": [],
+    "expectedEvidence": [],
     "mustHold": true,
     "holdReason": "no-source",
     "mustHandover": false,
@@ -457,6 +655,7 @@
     "kind": "staff-qa",
     "question": "대표원장님 10월에 휴가 가시는 날 있어요?",
     "expectedDocs": [],
+    "expectedEvidence": [],
     "mustHold": true,
     "holdReason": "no-source",
     "mustHandover": false,
@@ -469,6 +668,7 @@
     "kind": "staff-qa",
     "question": "카드 무이자 할부 몇 개월까지 돼요?",
     "expectedDocs": [],
+    "expectedEvidence": [],
     "mustHold": true,
     "holdReason": "no-source",
     "mustHandover": false,
@@ -481,6 +681,7 @@
     "kind": "staff-qa",
     "question": "외국인 환자가 오면 통역 서비스가 있나요?",
     "expectedDocs": [],
+    "expectedEvidence": [],
     "mustHold": true,
     "holdReason": "no-source",
     "mustHandover": false,
@@ -493,6 +694,7 @@
     "kind": "staff-qa",
     "question": "멀리서 오는 환자한테 근처 제휴 숙소를 안내할 수 있어요?",
     "expectedDocs": [],
+    "expectedEvidence": [],
     "mustHold": true,
     "holdReason": "no-source",
     "mustHandover": false,
@@ -505,6 +707,7 @@
     "kind": "staff-qa",
     "question": "직원 연차 신청은 어디에 해요?",
     "expectedDocs": [],
+    "expectedEvidence": [],
     "mustHold": true,
     "holdReason": "no-source",
     "mustHandover": false,
@@ -517,6 +720,7 @@
     "kind": "staff-qa",
     "question": "대기실 와이파이 비밀번호가 뭐예요?",
     "expectedDocs": [],
+    "expectedEvidence": [],
     "mustHold": true,
     "holdReason": "no-source",
     "mustHandover": false,
@@ -530,6 +734,12 @@
     "question": "예약금을 환불받으려면 방문 며칠 전까지 취소해야 돼요?",
     "expectedDocs": [
       "V04"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V04",
+        "quote": "방문 2일 전까지 취소하면 예약금을 전액 환불합니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -547,6 +757,12 @@
     "expectedDocs": [
       "V04"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V04",
+        "quote": "방문 1일 전이나 당일에 취소하거나 연락 없이 오지 않으면 예약금을 환불하지 않습니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -562,6 +778,12 @@
     "question": "모발이식 모당 얼마로 안내해요?",
     "expectedDocs": [
       "V03"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V03",
+        "quote": "모발이식은 모당 2,000원이며 최소 500모부터 시술합니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -579,6 +801,12 @@
     "expectedDocs": [
       "V04"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V04",
+        "quote": "방문 당일에는 변경할 수 없고"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -594,6 +822,16 @@
     "question": "두피 주사 10회 패키지로 하면 얼마예요?",
     "expectedDocs": [
       "V03"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V03",
+        "quote": "회차를 묶어도 1회 가격은 같습니다"
+      },
+      {
+        "doc": "V03",
+        "quote": "두피 주사는 1회 120,000원입니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -611,6 +849,12 @@
     "expectedDocs": [
       "V05"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V05",
+        "quote": "직원은 환자가 보낸 사진이나 설명만으로 모수나 탈모 단계를 안내하지 않습니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -625,6 +869,12 @@
     "expectedDocs": [
       "V05",
       "V10"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V10",
+        "quote": "직원은 보낸 사진을 보고 탈모 단계, 필요한 모수, 경과가 괜찮은지를 말하지 않습니다"
+      }
     ],
     "mustHold": false,
     "holdReason": null,
@@ -641,6 +891,16 @@
       "V11",
       "V12"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V11",
+        "quote": "직원은 증상이 정상인지, 어떤 약을 먹어야 하는지, 병원에 와야 하는지를 스스로 말하지 않습니다"
+      },
+      {
+        "doc": "V12",
+        "quote": "적신호 문의는 확인한 순간부터 5분 안에 인계합니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -655,6 +915,12 @@
     "expectedDocs": [
       "V17"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V17",
+        "quote": "약의 용량, 복용 중단, 다른 약과 함께 먹어도 되는지, 부작용에 관한 질문은 의료진만 답합니다"
+      }
+    ],
     "mustHold": false,
     "holdReason": null,
     "mustHandover": false,
@@ -668,6 +934,12 @@
     "inquiryId": "Q25",
     "expectedDocs": [
       "V17"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V17",
+        "quote": "약에 관한 문의가 오면 약 이름과 질문을 원문 그대로 기록해"
+      }
     ],
     "mustHold": true,
     "holdReason": "medical",
@@ -684,6 +956,12 @@
       "V11",
       "V12"
     ],
+    "expectedEvidence": [
+      {
+        "doc": "V11",
+        "quote": "애매한 표현이 수술 후 문맥과 함께 나오면 역시 바로 인계합니다"
+      }
+    ],
     "mustHold": true,
     "holdReason": "medical",
     "mustHandover": true,
@@ -698,6 +976,12 @@
     "expectedDocs": [
       "V11",
       "V12"
+    ],
+    "expectedEvidence": [
+      {
+        "doc": "V11",
+        "quote": "인계할지 애매하면 인계합니다"
+      }
     ],
     "mustHold": true,
     "holdReason": "medical",

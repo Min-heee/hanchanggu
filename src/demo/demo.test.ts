@@ -332,9 +332,9 @@ describe("평가 탭(F15) — 녹화 없음", () => {
     expect([m("redflag-miss").numerator, m("redflag-miss").denominator, m("redflag-miss").pass]).toEqual([0, 15, true]);
     expect([m("over-handover").numerator, m("over-handover").denominator]).toEqual([1, 25]);
     expect(m("over-handover").failures.map((f) => f.id)).toEqual(["Q24"]);
-    // scripts/eval-retrieval.ts의 '문단@5 40/42'와 같아야 한다(같은 retrieve).
-    expect([m("retrieval-hit").numerator, m("retrieval-hit").denominator]).toEqual([40, 42]);
-    expect(m("retrieval-hit").failures.map((f) => f.id)).toEqual(["G46", "G49"]);
+    // scripts/eval-retrieval.ts의 '문단@5 41/42'와 같아야 한다(같은 retrieve). G46은 직원 질문 인계 절차 앞세우기(core/retrieve.ts 규칙 3)로 적중.
+    expect([m("retrieval-hit").numerator, m("retrieval-hit").denominator]).toEqual([41, 42]);
+    expect(m("retrieval-hit").failures.map((f) => f.id)).toEqual(["G49"]);
     expect([m("handover-golden-rule").numerator, m("handover-golden-rule").denominator]).toEqual([3, 3]);
   });
 
@@ -353,7 +353,7 @@ describe("평가 탭(F15) — 녹화 없음", () => {
 
   it("분모가 10보다 작으면 퍼센트를 적지 않는다", () => {
     expect(metricValue(m("handover-golden-rule"))).toBe("3 / 3");
-    expect(metricValue(m("retrieval-hit"))).toBe("40 / 42 (95.2%)");
+    expect(metricValue(m("retrieval-hit"))).toBe("41 / 42 (97.6%)");
     expect(metricValue(m("false-hold"))).toBe("AI 답 준비 전");
   });
 

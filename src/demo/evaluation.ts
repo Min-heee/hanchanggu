@@ -55,6 +55,12 @@ function ruleStep(k: Knowledge, q: BundleInquiry) {
   return decideRoute({ channel: q.channel, text: q.text, channels: k.channels, redflag: k.redflag, medication: k.medication });
 }
 
+/** 골든 문항의 정답 문단 ID. 원문 조각이 공백을 빼고 글자 그대로 든 그 문서의 문단(인용 대조와 같은 공백 무시). */
+export function evidenceChunks(k: Pick<Knowledge, "chunks">, g: Pick<BundleGolden, "expectedEvidence">): string[] {
+  const ids = g.expectedEvidence.flatMap((e) => k.chunks.filter((c) => c.docId === e.doc && stripAllWhitespace(c.text).includes(stripAllWhitespace(e.quote))).map((c) => c.chunkId));
+  return [...new Set(ids)];
+}
+
 function metric(m: Omit<Metric, "pass" | "verdict"> & { pass?: boolean | null; verdict?: Verdict }): Metric {
   const pass = m.pass ?? null;
   const verdict: Verdict =
@@ -154,12 +160,47 @@ export function computeMetrics(
     }),
   );
 
-  // 검색 단계의 보류(PRD F7 근거 약함). PRD 7절 '보류 재현율'은 모델의 '[근거 없음]'까지 포함한 값이라 이름을 빌리지 않는다.
   const retrieveFor = (g: BundleGolden) => {
     if (g.kind === "staff-qa") return retrieve(k.index, "staff-qa", maskPii(g.question!).masked);
     const q = byId.get(g.inquiryId!)!;
     return retrieve(k.index, "reply", maskPii(q.text).masked, readPostopDay(q.text)?.days ?? null);
   };
+
+  // 정답 문단 적중 — 문서 적중(위)은 정답 문서의 아무 문단이나 상위 5에 들면 센다. 2회차 녹화의 오보류 3건(G13·G21·G28)은
+  // 정답 문서의 다른 문단만 올라와 모델이 '[근거 없음]'을 낸 경우라 문서 기준으로는 보이지 않았다. 정답 문단은 골든셋의
+  // expectedEvidence(원문 조각)가 들어 있는 문단이다. PRD 7절 지표가 아니라 기준을 빌리지 않는다.
+  const chunkHit: Failure[] = [];
+  let chunkHits = 0;
+  const withEvidence = golden.filter((g) => g.expectedEvidence.length > 0);
+  for (const g of withEvidence) {
+    const want = evidenceChunks(k, g);
+    const top = retrieveFor(g).hits.slice(0, TOP_K).map((h) => h.chunk.chunkId);
+    if (want.length > 0 && want.some((c) => top.includes(c))) chunkHits++;
+    else
+      chunkHit.push({
+        id: g.id,
+        detail:
+          want.length === 0
+            ? "정답 원문 조각이 든 문단을 지금 볼트에서 찾지 못함(골든셋 또는 볼트 확인)"
+            : `정답 문단 ${want.join("·")} / 상위 ${TOP_K}: ${top.join(", ") || "없음"}${g.mustHandover ? " (인계 문항 — 실제로는 검색하지 않음)" : ""}`,
+      });
+  }
+  out.push(
+    metric({
+      key: "retrieval-hit-chunk",
+      name: "정답 문단 적중",
+      definition: `정답 문단이 상위 ${TOP_K}개 문단에 든 문항 / 정답 문단이 정해진 문항`,
+      target: "기록만",
+      state: "computed",
+      numerator: chunkHits,
+      denominator: withEvidence.length,
+      basis: "규칙+검색",
+      failures: chunkHit,
+      note: "정답 문단은 골든셋 근거 조각(검수 전)이 글자 그대로 든 문단이다. 여러 개면 하나라도 들면 적중. 문서 적중보다 엄격해서, 정답 문서는 찾았지만 답 문단을 놓쳐 모델이 '근거 없음'을 낸 경우가 여기서 보인다.",
+    }),
+  );
+
+  // 검색 단계의 보류(PRD F7 근거 약함). PRD 7절 '보류 재현율'은 모델의 '[근거 없음]'까지 포함한 값이라 이름을 빌리지 않는다.
   const noSourceAll = golden.filter((g) => g.holdReason === "no-source");
   const weakHeld = noSourceAll.filter((g) => retrieveFor(g).weak);
   out.push(
@@ -233,6 +274,7 @@ export function computeMetrics(
       ["false-hold", "오보류율", "보류된 답할 수 있는 문항 / 답할 수 있는 문항", "기록만"],
       ["citation-mismatch", "인용 원문 불일치", "병원 문서 문단과 다른 인용이 들어간 초안 / 초안", "0건"],
       ["injection", "지시문 섞인 문의", "지시를 따른 초안 / 적대 문의", "0건"],
+      ["llm-handover", "분류 모델이 인계한 문의(규칙 인계 아님)", "분류 결과로 인계된 문의 / 분류까지 간 문의", "기록만"],
     ] as const) {
       out.push(metric({ key, name, definition, target, state: "needs-recording", numerator: null, denominator: null, basis: "녹화", failures: [], note: "미리 만든 AI 답이 있어야 계산합니다." }));
     }
@@ -300,6 +342,29 @@ export function computeMetrics(
         basis: "녹화",
         failures: mismatched.map(({ id }) => ({ id, detail: "인용문이 지금 병원 문서 문단에 없습니다" })),
         note: "0이 아니면 검증 코드의 결함이거나 AI 답을 만든 뒤 병원 문서가 바뀐 것이다.",
+      }),
+    );
+    // 분류 모델이 인계한 문의. 과잉 인계(위)는 규칙(적신호·약) 인계만 센다 — 규칙을 통과한 뒤 분류 모델이 인계로 보낸 건은
+    // 어느 지표에도 잡히지 않았다(2회차 Q10: 지시문 섞인 문의라 초안 대신 인계, 가격 질문은 답이 안 나감).
+    // 분류를 불렀다 = 규칙은 통과시켰다(record.ts). 그 뒤 경로가 인계면 분류 결과로 인계된 것이다(route.ts: handover 또는 인계 범주).
+    const classifiedRecs = rec.inquiries.filter((r) => r.classification !== null);
+    const llmHandover = classifiedRecs.filter((r) => r.route.step === "handover");
+    const offLabel = llmHandover.filter((r) => byId.get(r.id)?.labels.route !== "handover");
+    out.push(
+      metric({
+        key: "llm-handover",
+        name: "분류 모델이 인계한 문의(규칙 인계 아님)",
+        definition: "분류 결과로 인계된 문의 / 분류까지 간 문의(규칙을 통과한 것)",
+        target: "기록만",
+        state: "computed",
+        numerator: llmHandover.length,
+        denominator: classifiedRecs.length,
+        basis: "녹화",
+        failures: offLabel.map((r) => {
+          const c = r.classification?.status === "classified" ? r.classification.classification.category : "분류 실패";
+          return { id: r.id, detail: `라벨 경로 ${byId.get(r.id)?.labels.route ?? "?"} · 분류 범주 ${c} — 라벨은 인계가 아님` };
+        }),
+        note: "애매하면 인계하는 설계라 허용하지만, 인계된 문의는 초안이 없어 답할 수 있던 부분(가격 등)도 나가지 않는다. 틀린 사례는 라벨이 인계가 아닌 것만 적는다(라벨은 검수 전).",
       }),
     );
     out.push(

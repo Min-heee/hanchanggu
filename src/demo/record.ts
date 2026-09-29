@@ -40,10 +40,14 @@ async function draftFor(client: ClaudeClient, k: Knowledge, mode: "reply" | "sta
         prices: k.prices,
         hours: k.hours,
         ad: k.ad,
+        linkTitles: k.linkTitles,
+        approvedLinks: k.approvedLinks,
       });
   return {
     draft,
-    retrieval: r.hits.map((h) => ({ chunkId: h.chunk.chunkId, score: h.score })),
+    retrieval: r.hits.map((h) => ({ chunkId: h.chunk.chunkId, score: h.score, pin: h.pin, postopBoost: h.postopBoost })),
+    // 화면이 녹화 때 판정을 그대로 보이게(근거 강도는 발췌 점수의 최댓값과 다를 수 있다 — core/retrieve.ts).
+    retrievalMeta: { expandedWith: r.expandedWith, topScore: r.topScore, weak: r.weak },
     excludedMatches: r.excluded.filter((e) => e.matched).map((e) => ({ docId: e.doc.id, reason: e.doc.reason })),
   };
 }
@@ -70,9 +74,9 @@ export async function recordInquiry(client: ClaudeClient, k: Knowledge, q: { id:
     maskedText: decision.mask.masked,
     ruleIds: decision.redflag.ruleIds,
   };
-  if (decision.step !== "draft") return { id: q.id, route, postopDay, classification, retrieval: null, excludedMatches: null, draft: null };
+  if (decision.step !== "draft") return { id: q.id, route, postopDay, classification, retrieval: null, retrievalMeta: null, excludedMatches: null, draft: null };
   const d = await draftFor(client, k, "reply", q.channel, decision.mask.masked, postopDay);
-  return { id: q.id, route, postopDay, classification, retrieval: d.retrieval, excludedMatches: d.excludedMatches, draft: d.draft };
+  return { id: q.id, route, postopDay, classification, retrieval: d.retrieval, retrievalMeta: d.retrievalMeta, excludedMatches: d.excludedMatches, draft: d.draft };
 }
 
 /**

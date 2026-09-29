@@ -6,6 +6,9 @@
  * 없는 키는 추측하지 않고 오류로 돌려준다 — 오류가 나면 초안은 보류된다.
  */
 
+import { fixParticle } from "./josa";
+import { dropLinkOnlyParens, linkText, WIKI_LINK_SOURCE, type Audience, type LinkTitles } from "./wikilink";
+
 export interface PriceItem {
   key: string;
   label: string;
@@ -235,42 +238,143 @@ export type FillResult =
   | { ok: true; text: string; fills: Fill[] }
   | { ok: false; errors: string[] };
 
+/** 채운 글의 조각. 화면이 코드가 넣은 값(fill)만 따로 칠하려고 나눠 둔다. 이어 붙이면 채운 글과 같다. */
+export interface OutgoingPart {
+  text: string;
+  fill: Fill | null;
+}
+
+export type OutgoingResult =
+  | { ok: true; text: string; fills: Fill[]; parts: OutgoingPart[]; /** 제목으로 바꾼 링크의 파일 이름(뺀 것 제외). */ links: string[] }
+  | { ok: false; errors: string[] };
+
+export interface OutgoingSources {
+  prices: PriceItem[] | null;
+  hours: Hours | null;
+  /**
+   * 없으면 `[[링크]]`를 건드리지 않는다(fillTemplate).
+   * approved: 환자에게 이름을 보내도 되는 문서(승인된 최신판)의 파일 이름. 환자 글에 이 밖의 문서(초안·옛 판·모르는 파일)를
+   * 가리키는 링크가 남으면 채우기 오류로 보류한다 — 제목만 넣어도 "가을 이벤트 안내 (초안, 미승인)"처럼 미승인 내용이 새거나
+   * 파일 이름이 그대로 나간다(3차 적대 검증). 직원 글은 막지 않는다(직원은 볼트를 볼 수 있다).
+   */
+  links?: { titles: LinkTitles; audience: Audience; approved?: ReadonlySet<string> } | null;
+}
+
+const TOKEN_RE = new RegExp(String.raw`\{\{\s*([^{}]*?)\s*\}\}|${WIKI_LINK_SOURCE}`, "g");
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
- * 자리표시자를 채운다. 알 수 있는 형식은 `{{price:키}}`와 `{{hours}}` 둘뿐이다.
+ * 같은 절(문장 부호 또는 앞 칸 뒤부터 이 칸 앞까지)에 단위 말이 이미 있나. "모당 {{price:graft}}", "1회 {{price:injection}}",
+ * "회당 ~", "매회 ~". 있으면 값에 "/모"를 또 붙이지 않는다("모당 2,000원/모" 방지).
+ * "10회"·"1회차"는 단위 말로 보지 않는다(횟수·회차이지 '한 번에'가 아니다).
+ * 가격표 단위가 "1모"처럼 숫자를 달고 있어도 "모"로 본다.
+ */
+export function unitAlreadySaid(clause: string, unit: string): boolean {
+  const u = escapeRe(unit.replace(/^1\s*/, "").trim());
+  if (!u) return false;
+  // "제1회"는 회차 이름이라 단위 말이 아니다(앞 글자 "제"를 뺀다).
+  const one = String.raw`(?:^|[^0-9제])(?:1|한|매)\s?${u}`;
+  return new RegExp(String.raw`(?:${one}|${u})(?:당|마다)(?![가-힣])|${one}에?(?![가-힣])`).test(clause);
+}
+
+/**
+ * 모델이 쓴 글(자리표시자·링크 그대로)을 보낼 글로 바꾼다(PRD F8). 알 수 있는 자리표시자는 `{{price:키}}`와 `{{hours}}` 둘뿐이다.
  * 모르는 형식, 없는 키, 닫히지 않은 `{{`는 모두 오류다(남은 괄호가 환자에게 나가면 안 된다).
  * 값 소스가 없으면(null) 그 자리표시자를 쓴 초안만 오류가 난다.
+ *
+ * 값을 넣으며 두 가지를 맞춘다. 단위: 같은 절에 "모당"·"1회"가 있거나 가격표 단위가 없으면(한 번만 받는 항목) "/단위"를 붙이지 않는다.
+ * 조사: 값 바로 뒤의 을/를·은/는·이/가·과/와·으로/로를 값의 끝소리에 맞춘다(core/josa.ts). 모델은 값을 모르고 조사를 썼기 때문이다.
+ * 이 함수는 결정적이다 — 같은 모델 글과 같은 볼트면 같은 글이 나온다. 녹화된 모델 글을 화면에서 다시 채울 수 있는 이유다.
  */
-export function fillTemplate(text: string, prices: PriceItem[] | null, hours: Hours | null): FillResult {
+export function composeOutgoing(modelText: string, src: OutgoingSources): OutgoingResult {
   const errors: string[] = [];
   const fills: Fill[] = [];
-  const out = text.replace(/\{\{\s*([^{}]*?)\s*\}\}/g, (whole, inner: string) => {
+  const links: string[] = [];
+  const parts: OutgoingPart[] = [];
+  const text = src.links?.audience === "patient" ? dropLinkOnlyParens(modelText) : modelText;
+
+  let last = 0;
+  /** 바로 앞에 넣은 값. 다음 글 조각의 첫 조사를 이 값에 맞춘다. */
+  let prevValue: string | null = null;
+  const pushText = (t: string) => {
+    if (t === "") return;
+    const fixed = prevValue !== null ? fixParticle(prevValue, t) : t;
+    prevValue = null;
+    const tail = parts[parts.length - 1];
+    if (tail && tail.fill === null) tail.text += fixed;
+    else parts.push({ text: fixed, fill: null });
+  };
+
+  for (const m of text.matchAll(TOKEN_RE)) {
+    const whole = m[0];
+    const at = m.index!;
+    const between = text.slice(last, at);
+    pushText(between);
+    last = at + whole.length;
+
+    if (m[1] === undefined) {
+      // 링크. 받는 사람을 모르면(fillTemplate) 그대로 둔다.
+      if (!src.links) {
+        pushText(whole);
+        continue;
+      }
+      const file = m[2].trim();
+      if (src.links.audience === "patient" && !(src.links.approved ?? src.links.titles).has(file)) {
+        errors.push(`환자에게 보낼 글이 승인되지 않았거나 모르는 문서를 가리킵니다: ${file}`);
+        pushText(whole);
+        continue;
+      }
+      const t = linkText(m[2], m[3], src.links.titles, src.links.audience);
+      links.push(file);
+      pushText(t);
+      prevValue = t;
+      continue;
+    }
+
+    const inner = m[1];
     const pm = /^price:([a-z0-9][a-z0-9_-]*)$/.exec(inner);
+    let value: string | null = null;
+    let fill: Fill | null = null;
     if (pm) {
-      if (!prices) {
-        errors.push(`가격표(V03)가 없어 ${whole}를 채울 수 없습니다`);
-        return whole;
+      const item = src.prices?.find((p) => p.key === pm[1]);
+      if (!src.prices) errors.push(`가격표(V03)가 없어 ${whole}를 채울 수 없습니다`);
+      else if (!item) errors.push(`가격표에 없는 키입니다: ${pm[1]}`);
+      else {
+        // 같은 절만 본다: 앞 칸 뒤부터, 마지막 문장 부호·쉼표·가운뎃점·쌍점·연결 어미("이고 ", "이며 ", "지만 " 등) 뒤부터.
+        // 문장 전체를 보면 앞 절의 다른 항목 "회당·매회"("두피 주사는 회당 약 10분이고 두피 관리는 {{price:scalp-care}}")가
+        // 이 값의 단위를 지웠다(3차 적대 검증 U2·U4). 절을 좁게 잡아 틀리면 단위가 한 번 더 붙을 뿐이고, 넓게 잡아 틀리면 단위가 사라진다.
+        const clause = between.replace(/^[\s\S]*(?:[.!?\n,·;:]|(?:이고|이며|이나|지만|는데|으며|며|고)\s)/, "");
+        value = item.unit && !unitAlreadySaid(clause, item.unit) ? renderPrice(item) : `${formatWon(item.price)}원`;
+        fill = { placeholder: whole, value, sourceDoc: "V03", key: item.key };
       }
-      const item = prices.find((p) => p.key === pm[1]);
-      if (!item) {
-        errors.push(`가격표에 없는 키입니다: ${pm[1]}`);
-        return whole;
+    } else if (inner === "hours") {
+      if (!src.hours) errors.push(`진료시간(V02)이 없어 ${whole}를 채울 수 없습니다`);
+      else {
+        value = renderHours(src.hours);
+        fill = { placeholder: whole, value, sourceDoc: "V02", key: null };
       }
-      const value = renderPrice(item);
-      fills.push({ placeholder: whole, value, sourceDoc: "V03", key: item.key });
-      return value;
+    } else errors.push(`알 수 없는 자리표시자입니다: ${whole}`);
+
+    if (value === null || fill === null) {
+      pushText(whole);
+      continue;
     }
-    if (inner === "hours") {
-      if (!hours) {
-        errors.push(`진료시간(V02)이 없어 ${whole}를 채울 수 없습니다`);
-        return whole;
-      }
-      const value = renderHours(hours);
-      fills.push({ placeholder: whole, value, sourceDoc: "V02", key: null });
-      return value;
-    }
-    errors.push(`알 수 없는 자리표시자입니다: ${whole}`);
-    return whole;
-  });
+    fills.push(fill);
+    parts.push({ text: value, fill });
+    prevValue = value;
+  }
+  pushText(text.slice(last));
+
+  const out = parts.map((p) => p.text).join("");
   if (errors.length === 0 && /\{\{|\}\}/.test(out)) errors.push("닫히지 않은 자리표시자가 남았습니다");
-  return errors.length > 0 ? { ok: false, errors } : { ok: true, text: out, fills };
+  return errors.length > 0 ? { ok: false, errors } : { ok: true, text: out, fills, parts, links };
+}
+
+/** 자리표시자만 채운다(링크는 그대로). 오류 규칙은 composeOutgoing과 같다. */
+export function fillTemplate(text: string, prices: PriceItem[] | null, hours: Hours | null): FillResult {
+  const r = composeOutgoing(text, { prices, hours, links: null });
+  return r.ok ? { ok: true, text: r.text, fills: r.fills } : r;
 }

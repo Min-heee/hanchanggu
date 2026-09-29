@@ -27,6 +27,8 @@ function input(over: Partial<DraftInput> = {}): DraftInput {
     prices: PRICES,
     hours: null,
     ad: { banned: [{ term: "최고", reason: null }], warn: [{ term: "할인", reason: null }] },
+    linkTitles: new Map([["booking-policy", "예약 규정"]]),
+    approvedLinks: new Set(["booking-policy"]),
     ...over,
   };
 }
@@ -149,20 +151,62 @@ describe("generateDraft — 결과", () => {
     expect(r.finalText).toBeNull();
   });
 
+  // 가격표 문단을 함께 받은 입력. 가격 칸은 그 금액이 적힌 문장을 인용한 문장 안에서만 쓴다.
+  const PRICE_SRC = "상담비는 10,000원입니다. 주사는 1회 50,000원입니다.";
+  const withPrice = (over: Partial<DraftInput> = {}) =>
+    input({
+      sources: [...input().sources, { docId: "V03", title: "가격표", chunks: [{ chunkId: "V03#1", text: PRICE_SRC }] }],
+      allowedDocIds: new Set(["V07", "V03"]),
+      prices: [...PRICES, { key: "injection", label: "주사 1회", price: 50000, unit: "회", note: null }],
+      ...over,
+    });
+  const citePrice = { type: "content_block_location", cited_text: PRICE_SRC, document_index: 1, document_title: "V03 가격표", start_block_index: 0, end_block_index: 1 };
+
   it("인용이 맞으면 ok, 자리표시자는 가격표 값으로 채운다", async () => {
     const { client } = mockClient(
       message([
         { type: "text", text: "안녕하세요, 샘플의원입니다.\n", citations: null },
         { type: "text", text: "D+3부터 가볍게 감으셔도 됩니다.", citations: [citeD3] },
-        { type: "text", text: "\n상담비는 {{price:consult}}입니다.", citations: null },
+        { type: "text", text: "\n" },
+        { type: "text", text: "상담비는 {{price:consult}}입니다.", citations: [citePrice] },
       ]),
     );
-    const r = await generateDraft(client, input());
+    const r = await generateDraft(client, withPrice());
     expect(r.status).toBe("ok");
     expect(r.finalText).toBe("안녕하세요, 샘플의원입니다.\nD+3부터 가볍게 감으셔도 됩니다.\n상담비는 10,000원입니다.");
     expect(r.fills).toEqual([{ placeholder: "{{price:consult}}", value: "10,000원", sourceDoc: "V03", key: "consult" }]);
-    expect(r.sentences.map((s) => s.kind)).toEqual(["allowlisted", "cited", "template"]);
+    expect(r.sentences.map((s) => s.kind)).toEqual(["allowlisted", "cited", "cited"]);
     expect(r.meta).toEqual({ model: MODEL, servedByFallback: false, stopReason: "end_turn", usage });
+  });
+
+  it("가격 칸 키가 인용한 원문 문장의 금액과 다르면 보류(price-mismatch) — 인용·겹침 대조는 통과하는 문장", async () => {
+    const r = await generateDraft(mockClient(message([{ type: "text", text: "상담비는 {{price:injection}}입니다.", citations: [citePrice] }])).client, withPrice());
+    expect([r.status, r.finalText, r.holdReasons.map((h) => h.code)]).toEqual(["hold", null, ["price-mismatch"]]);
+    expect(r.holdReasons[0].detail).toContain("인용한 원문 문장의 금액(10,000원)과 다릅니다");
+  });
+
+  it("인용 없는 가격 칸 문장은 보류(uncited-sentence) — 가격 칸은 인용 문장 안에서만", async () => {
+    const r = await generateDraft(mockClient(message([{ type: "text", text: "상담비는 {{price:consult}}입니다.", citations: null }])).client, withPrice());
+    expect(r.holdReasons.map((h) => h.code)).toEqual(["uncited-sentence"]);
+  });
+
+  it("보내는 글에서 볼트 링크를 바꾼다 — 환자 답장은 제목(괄호 속 참고 표시는 뺌), 사내 Q&A는 ‘제목’", async () => {
+    const a = "D+3부터 가볍게 머리를 감을 수 있습니다([[booking-policy]]).";
+    const b = "예약금은 [[booking-policy]]를 따릅니다.";
+    const sources = [{ docId: "V07", title: "수술 후 날짜별 관리", chunks: [{ chunkId: "V07#0", text: a }, { chunkId: "V07#1", text: b }] }];
+    const at = (i: number, t: string) => ({ ...citeD3, cited_text: t, start_block_index: i, end_block_index: i + 1 });
+    const content = [
+      { type: "text", text: a, citations: [at(0, a)] },
+      { type: "text", text: " " + b, citations: [at(1, b)] },
+    ];
+    const text = `${a} ${b}`;
+    const reply = await generateDraft(mockClient(message(content)).client, input({ sources }));
+    expect(reply.status).toBe("ok");
+    // 인용 대조는 모델 글(링크 그대로)로 했다. 모델 글은 바꾸지 않는다.
+    expect(reply.modelText).toBe(text);
+    expect(reply.finalText).toBe("D+3부터 가볍게 머리를 감을 수 있습니다. 예약금은 예약 규정을 따릅니다.");
+    const staff = await generateDraft(mockClient(message(content)).client, input({ mode: "staff-qa", sources }));
+    expect(staff.finalText).toBe("D+3부터 가볍게 머리를 감을 수 있습니다(‘예약 규정’). 예약금은 ‘예약 규정’을 따릅니다.");
   });
 
   it("인용문이 원문과 다르면 보류하고 최종 초안을 내지 않는다", async () => {
@@ -172,8 +216,8 @@ describe("generateDraft — 결과", () => {
   });
 
   it("없는 가격 키는 보류(template)", async () => {
-    const { client } = mockClient(message([{ type: "text", text: "주차비는 {{price:parking}}입니다.", citations: null }]));
-    const r = await generateDraft(client, input());
+    const { client } = mockClient(message([{ type: "text", text: "상담비는 {{price:parking}}입니다.", citations: [citePrice] }]));
+    const r = await generateDraft(client, withPrice());
     expect(r.holdReasons).toEqual([{ code: "template", detail: "가격표에 없는 키입니다: parking" }]);
   });
 

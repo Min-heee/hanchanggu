@@ -15,9 +15,31 @@
  */
 
 import { z } from "zod";
+import type { PinReason } from "../core/retrieve";
 import type { RouteStep } from "../core/route";
 import type { ClassifyResult } from "../llm/classify";
 import type { DraftResult } from "../llm/draft";
+
+/**
+ * 녹화 때 검색 결과 한 줄. pin·postopBoost는 3회차 녹화부터 남는다(2회차 파일에는 없다 — 그때는 앞세우기 규칙이 경과일뿐이었다).
+ * 없으면 화면은 '규칙으로 앞에 섬' 표시를 하지 않는다.
+ */
+export interface RecordedHit {
+  chunkId: string;
+  score: number;
+  pin?: PinReason | null;
+  postopBoost?: boolean;
+}
+
+/**
+ * 녹화 때 검색의 부가 정보(3회차 녹화부터). 근거 강도(topScore·weak)는 넓히기 전 질의·찾는 말을 뺀 색인으로 재므로
+ * 발췌 점수의 최댓값과 다를 수 있다 — 화면의 '근거 약함' 표시가 녹화 때 판정과 같게 따로 남긴다.
+ */
+export interface RetrievalMeta {
+  expandedWith: string[];
+  topScore: number;
+  weak: boolean;
+}
 
 export interface InquiryRecord {
   id: string;
@@ -25,7 +47,8 @@ export interface InquiryRecord {
   /** 녹화 때 문의에서 읽은 경과일(검색 앞세우기에 쓴 값). */
   postopDay: number | null;
   classification: ClassifyResult | null;
-  retrieval: { chunkId: string; score: number }[] | null;
+  retrieval: RecordedHit[] | null;
+  retrievalMeta?: RetrievalMeta | null;
   excludedMatches: { docId: string; reason: string }[] | null;
   draft: DraftResult | null;
 }
@@ -35,7 +58,8 @@ export interface GoldenRecord {
   question: string;
   /** 모델에 보낸 질문(개인정보를 가린 것). 화면의 'AI가 받은 텍스트'는 이 값을 보인다. */
   maskedQuestion: string;
-  retrieval: { chunkId: string; score: number }[];
+  retrieval: RecordedHit[];
+  retrievalMeta?: RetrievalMeta | null;
   excludedMatches: { docId: string; reason: string }[];
   draft: DraftResult;
 }
@@ -53,7 +77,15 @@ export interface DemoRecording {
   golden: GoldenRecord[];
 }
 
-const Retrieval = z.array(z.strictObject({ chunkId: z.string(), score: z.number() }));
+const Retrieval = z.array(
+  z.strictObject({
+    chunkId: z.string(),
+    score: z.number(),
+    pin: z.enum(["redflag", "handover", "medication", "day-base"]).nullable().optional(),
+    postopBoost: z.boolean().optional(),
+  }),
+);
+const RetrievalMetaSchema = z.strictObject({ expandedWith: z.array(z.string()), topScore: z.number(), weak: z.boolean() }).nullable().optional();
 const Excluded = z.array(z.strictObject({ docId: z.string(), reason: z.string() }));
 
 const Citation = z.strictObject({ docId: z.string(), chunkIds: z.array(z.string()), citedText: z.string() });
@@ -128,12 +160,21 @@ export const DemoRecordingSchema = z.strictObject({
       postopDay: z.number().nullable(),
       classification: ClassificationSchema.nullable(),
       retrieval: Retrieval.nullable(),
+      retrievalMeta: RetrievalMetaSchema,
       excludedMatches: Excluded.nullable(),
       draft: DraftSchema.nullable(),
     }),
   ),
   golden: z.array(
-    z.strictObject({ id: z.string(), question: z.string(), maskedQuestion: z.string(), retrieval: Retrieval, excludedMatches: Excluded, draft: DraftSchema }),
+    z.strictObject({
+      id: z.string(),
+      question: z.string(),
+      maskedQuestion: z.string(),
+      retrieval: Retrieval,
+      retrievalMeta: RetrievalMetaSchema,
+      excludedMatches: Excluded,
+      draft: DraftSchema,
+    }),
   ),
 });
 
