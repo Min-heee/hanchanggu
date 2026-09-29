@@ -277,6 +277,15 @@ describe("checkRedflags — 증상이 아닌 단어(실제 V11 nonSymptomWords)"
     expect(checkRedflags("코피가 안 멈춰요", cfg).decision).toBe("handover");
   });
 
+  // 약 이름 '피나스테리드'의 '피나'가 출혈 모호어('피나')로 읽혀, 약만 묻는 질문에도 적신호 인계가 됐다(적대 검증).
+  it("'피나스테리드'는 '피나'로 읽지 않고, 옆의 진짜 '피나요'는 잡는다", () => {
+    const r = checkRedflags("수술 후 피나스테리드 계속 먹어도 돼요?", cfg);
+    expect(r.decision).toBe("pass");
+    expect(r.matchedAmbiguous).toEqual([]);
+    expect(checkRedflags("피나스테리드 먹는데 이식 부위에서 피나요", cfg)).toMatchObject({ decision: "handover" });
+    expect(checkRedflags("피나스테리드 먹는데 이식 부위에서 피나요", cfg).matchedAmbiguous).toContain("피나");
+  });
+
   it("문맥어는 가리지 않는다(두피 주사 맞고 → 문맥 '주사 맞' 유지)", () => {
     expect(checkRedflags("두피 주사 맞고 나서 두드러기가 나요", cfg).matchedContext).toContain("주사 맞");
   });

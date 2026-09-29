@@ -16,7 +16,11 @@ import { readPostopDay } from "../core/postop";
 import { MIN_TOP_SCORE, retrieve, TOP_K } from "../core/retrieve";
 import { decideRoute } from "../core/route";
 import { stripAllWhitespace } from "../core/citations";
+import { checkMedication } from "../core/medication";
+import { checkRedflags } from "../core/redflag";
 import type { BundleGolden, BundleInquiry } from "./bundle";
+import { readHandoverPolicy } from "./policy";
+import { staffRuleCard } from "./qa";
 import type { DemoRecording } from "./recording";
 import { HOLD_TEXT } from "./view";
 
@@ -250,6 +254,38 @@ export function computeMetrics(
       basis: "규칙",
       failures: notBlocked.map((g) => ({ id: g.id, detail: `${g.inquiryId} 규칙 경로: ${decisions.get(g.inquiryId!)!.step}` })),
       note: `적신호 누락과 ${overlap.length}건 겹침(${overlap.join("·")}). PRD 7절의 보류 재현율과 다른 값이다.`,
+    }),
+  );
+
+  // 적신호·약이 담긴 직원 질문에 규칙 카드가 떴나(사내 Q&A, src/demo/qa.ts staffRuleCard). PRD 지표가 아니다.
+  // 분모는 문의 게이트와 같은 판정(checkRedflags·checkMedication)에 걸리는 직원 질문이고, 분자는 그중 카드가 떠서 인계 절차 문단을
+  // 인용한 문항이다. 카드는 약 말에 직원 질문용 좁은 기준(V17 qaPinIgnore)을 쓰고 V12 문단을 읽어야 하므로, 둘이 어긋나면 여기서 보인다.
+  // 분모도 규칙이 고르므로 "적신호가 담긴 질문을 다 찾았나"는 이 값으로 알 수 없다(적신호 누락 지표와 같은 한계).
+  const handoverPolicy = readHandoverPolicy(k.chunks);
+  const staffAsked = golden
+    .filter((g) => g.kind === "staff-qa" && g.question)
+    .map((g) => ({ g, masked: maskPii(g.question!).masked }))
+    .filter(({ masked }) => checkRedflags(masked, k.redflag).decision === "handover" || checkMedication(masked, k.medication).decision === "handover");
+  const carded = staffAsked.map((x) => ({ ...x, card: staffRuleCard(k, handoverPolicy, x.masked) }));
+  const shown = carded.filter((x) => x.card !== null && x.card.quotes.length > 0);
+  out.push(
+    metric({
+      key: "staff-rule-card",
+      name: "적신호·약이 담긴 직원 질문에 규칙 카드가 떴나",
+      definition: "규칙 카드가 떠서 인계 절차 문단을 인용한 문항 / 적신호·약 규칙에 걸리는 골든셋 직원 질문",
+      target: "기록만",
+      state: "computed",
+      numerator: shown.length,
+      denominator: staffAsked.length,
+      verdict: { tone: "neutral", label: "기록만 · 분모도 규칙이 고름" },
+      basis: "규칙",
+      failures: carded
+        .filter((x) => !shown.includes(x))
+        .map(({ g, card }) => ({
+          id: g.id,
+          detail: card === null ? "약 말이 직원 질문 기준(V17 qaPinIgnore)에서 빠져 카드가 뜨지 않음" : "카드는 떴지만 인계 절차 문서에서 문단을 읽지 못함",
+        })),
+      note: `카드가 뜬 문항: ${shown.map((x) => x.g.id).join("·") || "없음"}. AI 답과 상관없이 규칙만으로 뜨므로 AI 답이 준비되기 전에도 같다. 알려진 한계: 부정문("고름 얘기 말고요"), 수술 뒤 일반 질문("수술 후 붓기 며칠 가요?"), 광고 문구를 묻는 질문("통증 없는 수술이라고 광고해도 돼요?")에도 카드가 뜬다 — 적신호 규칙은 부정·쓰임새를 가리지 않고 애매하면 인계하는 쪽이다. "처방전 재발급은 어디서 해요?"처럼 직원이 해도 되는 행정 안내에도 약 카드가 뜬다.`,
     }),
   );
 

@@ -5,13 +5,17 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { buildKnowledge } from "../core/knowledge";
+import { checkMedication } from "../core/medication";
 import { maskPii } from "../core/mask";
+import { retrieve } from "../core/retrieve";
+import { loadVault } from "../core/vault";
 import { analyzeInquiry, analyzeStaffQuestion } from "./analyze";
-import { DEMO_NOW_MS } from "./clock";
+import { DEMO_AS_OF, DEMO_NOW_MS } from "./clock";
 import { buildFakeRecording } from "./fake-recording";
 import { buildInboxItem, handoverInfo } from "./inbox";
 import { readConfirmPolicy, readHandoverPolicy } from "./policy";
-import { gapDecision, gapEntry, preparedFromParam } from "./qa";
+import { gapDecision, gapEntry, preparedFromParam, staffRuleCard } from "./qa";
 import { parseDemoRecording } from "./recording";
 import {
   bandText,
@@ -334,3 +338,123 @@ describe("사내 Q&A — 문서 빈칸 자동 추가", () => {
     expect(preparedFromParam(bundle.golden, null)).toBeNull();
   });
 });
+
+describe("사내 Q&A — 규칙 카드(적신호·약이 담긴 직원 질문)", () => {
+  const G46 = "수술 2주째 환자가 이식 부위에서 고름이 나온다는데 연고 바르라고 해도 돼요?";
+  const G47 = "미녹시딜이랑 먹는 탈모약을 같이 먹어도 되냐는 문의에는 뭐라고 답해요?";
+  const text = (id: string) => k.chunks.find((c) => c.chunkId === id)!.text;
+
+  it("G46: 적신호(고름)+약(연고) — V12에서 읽은 5분, 담당(누구에게)·시한(몇 분 안에) 문단을 원문 그대로 인용", () => {
+    const c = staffRuleCard(k, policies.handover, G46)!;
+    expect(c.headline).toBe("이 질문은 환자 증상·약 얘기를 담고 있습니다 — 인계 절차대로 5분 안에 의료진에게 넘기세요. 직원은 증상·약에 답하지 않습니다.");
+    expect([c.urgent, c.urgencyLabel, c.minutes]).toEqual([true, "긴급", 5]);
+    expect(c.rules.map((r) => r.id)).toEqual(["RF-01", "MED-01"]);
+    expect([c.words, c.medTerms]).toEqual([["고름"], ["연고"]]);
+    expect(c.quotes.map((q) => q.chunkId)).toEqual(["V12#1", "V12#2"]);
+    for (const q of c.quotes) expect(q.text).toBe(text(q.chunkId));
+    expect(c.quotes[1].text).toContain("적신호 문의는 확인한 순간부터 5분 안에 인계합니다");
+    expect(c.docTitle).toBe("의료진 인계 절차");
+    expect(c.patientMessage?.text).toBe(policies.handover.patientMessage!.value);
+  });
+
+  it("카드가 인용한 시한 문단은 발췌 맨 앞에 선 인계 문단과 같다(같은 판정 함수)", () => {
+    const c = staffRuleCard(k, policies.handover, G46)!;
+    const pinned = retrieve(k.index, "staff-qa", G46).hits.find((h) => h.pin === "handover")!.chunk.chunkId;
+    expect(c.quotes.map((q) => q.chunkId)).toContain(pinned);
+  });
+
+  it("G47: 약 문의뿐이면 분을 적지 않는다 — V12의 5분은 '적신호 문의' 문장이다", () => {
+    const c = staffRuleCard(k, policies.handover, G47)!;
+    expect(c.headline).toBe("이 질문은 약 얘기를 담고 있습니다 — 인계 절차대로 의료진에게 넘기세요. 직원은 증상·약에 답하지 않습니다.");
+    expect([c.urgent, c.urgencyLabel, c.minutes]).toEqual([false, "인계", null]);
+    expect(c.rules.map((r) => r.id)).toEqual(["MED-01"]);
+    expect(c.quotes.map((q) => q.chunkId)).toEqual(["V12#0", "V12#1"]);
+    // 볼트 링크만 제목으로 바꾼다.
+    expect(c.quotes[0].text).toBe(replaceWikiLinks(text("V12#0"), k));
+    expect(c.quotes[0].text).not.toContain("[[");
+    expect(c.deadlineText).toContain("적신호 문의 기준");
+  });
+
+  it("시한은 V12에서 읽은 값을 따른다 — 문서가 10분으로 바뀌면 카드도 10분, 못 읽으면 분을 지어내지 않는다", () => {
+    const ten = staffRuleCard(k, { ...policies.handover, handoverMinutes: { value: 10, chunkId: "V12#2" } }, G46)!;
+    expect(ten.headline).toContain("10분 안에 의료진에게");
+    const none = staffRuleCard(k, { ...policies.handover, handoverMinutes: null }, G46)!;
+    expect(none.minutes).toBeNull();
+    expect(none.headline).toContain("인계 절차대로 의료진에게");
+    expect(none.deadlineText).toContain("읽지 못함");
+  });
+
+  it("규칙에 안 걸리는 질문에는 카드가 없다 — 절차 질문(G22)·약도·'먹어도'만 있는 질문(V17 qaPinIgnore)", () => {
+    expect(staffRuleCard(k, policies.handover, "적신호 문의를 보면 몇 분 안에 누구에게 넘겨요?")).toBeNull();
+    expect(staffRuleCard(k, policies.handover, "첫 상담은 몇 분 걸려요?")).toBeNull();
+    // 문의 게이트라면 인계였을 말이지만 직원 질문에서는 약 이야기가 아닐 때가 많다(발췌 앞세우기와 같은 기준).
+    expect(checkMedication("점심시간에 밥 먹어도 돼요?", k.medication).decision).toBe("handover");
+    expect(staffRuleCard(k, policies.handover, "점심시간에 밥 먹어도 돼요?")).toBeNull();
+    expect(staffRuleCard(k, policies.handover, "병원 약도는 어디서 보내요?")).toBeNull();
+  });
+
+  it("분을 적으면 그 분을 읽은 V12 문단도 인용한다 — 골든셋 직원 질문 전부", () => {
+    const staff = realBundle().golden.filter((g) => g.kind === "staff-qa" && g.question);
+    let withMinutes = 0;
+    for (const g of staff) {
+      const c = staffRuleCard(k, policies.handover, maskPii(g.question!).masked);
+      if (!c || c.minutes === null) continue;
+      withMinutes++;
+      expect(c.quotes.map((q) => q.chunkId), g.id).toContain(policies.handover.handoverMinutes!.chunkId);
+    }
+    expect(withMinutes).toBeGreaterThan(0);
+  });
+
+  // 적대 검증: 분은 "N분 안에 인계" 문장에서, 인계 문단은 '적신호'라는 말로 따로 고른다. 둘이 갈라지면 카드에 5분만 뜨고
+  // 인용은 '누구에게' 문단의 "5분 안에 답이 없으면"(다른 뜻)뿐이었다.
+  it("V12 문구가 바뀌어 인계 문단 고르기와 분 읽기가 갈라져도, 분을 읽은 문단을 인용한다", () => {
+    const files = realInputs().vaultFiles.map((f) =>
+      f.path === "handover-procedure.md" ? { ...f, raw: f.raw.replace("적신호 문의는 확인한 순간부터", "증상 문의는 확인한 순간부터") } : f,
+    );
+    expect(files.find((f) => f.path === "handover-procedure.md")!.raw).toContain("증상 문의는 확인한 순간부터");
+    const kr = buildKnowledge(loadVault(files, { asOf: DEMO_AS_OF }));
+    if (!kr.ok) throw new Error(kr.errors.join("\n"));
+    const policy = readHandoverPolicy(kr.knowledge.chunks);
+    const c = staffRuleCard(kr.knowledge, policy, G46)!;
+    expect(c.minutes).toBe(5);
+    expect(c.quotes.map((q) => q.chunkId)).toContain(policy.handoverMinutes!.chunkId);
+    expect(c.quotes.some((q) => q.text.includes("확인한 순간부터 5분 안에 인계합니다"))).toBe(true);
+  });
+
+  it("약만 걸린 카드에는 판정에 쓰지 않은 증상 말을 보이지 않는다", () => {
+    // '붓기'는 수술 후 문맥이 없어 적신호 판정에 쓰이지 않았다. 약(진통제)만 걸린 카드다.
+    const c = staffRuleCard(k, policies.handover, "진통제 먹으면 붓기 빠져요?")!;
+    expect(c.rules.map((r) => r.id)).toEqual(["MED-01"]);
+    expect([c.words, c.context, c.minutes]).toEqual([[], [], null]);
+  });
+
+  it("'피나스테리드' 안의 '피나'는 출혈로 읽지 않는다(V11 nonSymptomWords) — 약 카드만, 5분 없음", () => {
+    for (const q of ["수술 후 피나스테리드 계속 먹어도 돼요?", "피나스테리드 끊어도 되냐고 물어요"]) {
+      const c = staffRuleCard(k, policies.handover, q)!;
+      expect(c.rules.map((r) => r.id), q).toEqual(["MED-01"]);
+      expect(c.words, q).toEqual([]);
+      expect(c.minutes, q).toBeNull();
+      expect(c.medTerms, q).toContain("피나스테리드");
+    }
+  });
+
+  it("수술 문맥 없이 애매한 말만 있으면 카드가 없다(두피 관리의 붉어짐)", () => {
+    expect(staffRuleCard(k, policies.handover, "두피 관리 받으면 두피가 붉어지나요?")).toBeNull();
+    expect(staffRuleCard(k, policies.handover, "두피가 가려운 환자는 어디로 안내해요?")).toBeNull();
+  });
+
+  it("알려진 한계: 광고 문구를 묻는 질문, 처방전 재발급 접수에도 카드가 뜬다", () => {
+    expect(staffRuleCard(k, policies.handover, "통증 없는 수술이라고 광고해도 돼요?")?.minutes).toBe(5);
+    expect(staffRuleCard(k, policies.handover, "처방전 재발급은 어디서 해요?")?.rules.map((r) => r.id)).toEqual(["MED-01"]);
+  });
+
+  it("알려진 한계: 부정문(\"고름 얘기 말고요\")에도 카드가 뜬다 — 적신호 규칙은 부정을 가리지 않는다", () => {
+    expect(staffRuleCard(k, policies.handover, "고름 얘기 말고요, 수술 후 샴푸는 언제부터 써요?")).not.toBeNull();
+  });
+
+  it("가린 글로 판정해도 같다(화면은 가린 질문으로 부른다)", () => {
+    const masked = maskPii(`010-1234-5678 환자분 ${G46}`).masked;
+    expect(staffRuleCard(k, policies.handover, masked)?.quotes.map((q) => q.chunkId)).toEqual(["V12#1", "V12#2"]);
+  });
+});
+

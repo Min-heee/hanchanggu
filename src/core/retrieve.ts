@@ -26,7 +26,7 @@
 import type { MedicationConfig } from "./medication";
 import { checkMedication } from "./medication";
 import { headingPostopRange, rangeContains, readPostopDay } from "./postop";
-import { checkRedflags, normalizeForMatch, type RedflagConfig } from "./redflag";
+import { checkRedflags, normalizeForMatch, type RedflagConfig, type RedflagResult } from "./redflag";
 import { queryFromInquiry, search, type ExcludedReport, type SearchHit, type SearchIndex } from "./search";
 import type { Chunk } from "./vault";
 
@@ -185,22 +185,52 @@ function pickChunk(index: SearchIndex, docId: string, words: string[]): Chunk | 
   return best;
 }
 
+/**
+ * 직원 질문이 적신호·약 규칙에 걸렸는지와, 그때 앞에 세울 문단. 발췌 앞세우기(규칙 3)와 사내 Q&A의 규칙 카드(src/demo/qa.ts)가
+ * 이 함수 하나를 쓴다 — 둘이 따로 판정하면 "카드는 떴는데 인계 절차 문단은 발췌에 없는" 화면이 생길 수 있다.
+ * 말 목록은 문의 게이트와 같은 볼트 값(V11·V17)이다. 코드에 목록을 따로 두지 않는다.
+ */
+export interface StaffRuleHits {
+  redflag: RedflagResult;
+  /** 약 말 중 qaPinIgnore를 뺀 것. 게이트(checkMedication)의 matchedTerms보다 좁다. */
+  medTerms: string[];
+  /** 적신호나 약 규칙 중 하나라도 걸렸는지. */
+  hit: boolean;
+  redflagChunk: Chunk | null;
+  medicationChunk: Chunk | null;
+  /** 인계 절차 문서에서 고른 문단. 적신호면 시한 문단, 약 문의뿐이면 첫 문단. 규칙에 안 걸렸거나 문서가 없으면 null. */
+  handoverChunk: Chunk | null;
+}
+
+export function staffRuleHits(index: SearchIndex, rules: StaffPinRules, question: string): StaffRuleHits {
+  const redflag = checkRedflags(question, rules.redflag);
+  const med = checkMedication(question, rules.medication);
+  const red = redflag.decision === "handover";
+  // 약 말은 직원 질문용 기준이 게이트보다 좁다(V17 qaPinIgnore — "약도"·"먹어도"만 있으면 약 질문이 아닐 때가 많다).
+  const medTerms = med.matchedTerms.filter((t) => !(rules.medication.qaPinIgnore ?? []).includes(t));
+  const hit = red || medTerms.length > 0;
+  return {
+    redflag,
+    medTerms,
+    hit,
+    redflagChunk: red ? pickChunk(index, rules.redflagDocId, [...redflag.matchedSymptoms, ...redflag.matchedAmbiguous]) : null,
+    medicationChunk: medTerms.length > 0 ? pickChunk(index, rules.medicationDocId, medTerms) : null,
+    // 인계 절차 문서에서는, 적신호면 시한("적신호 문의는 … 5분 안에 인계합니다")이 든 문단을, 약 문의뿐이면 첫 문단("언제 인계하나")을 고른다.
+    // 2회차 G46 검토에서 빠진 핵심이 '5분 안에 인계'였는데, 말 없이 고르면 첫 문단이 와 그 문장이 모델에 가지 않았다(3차 회귀 확인).
+    handoverChunk: hit ? pickChunk(index, rules.handoverDocId, red ? ["적신호"] : []) : null,
+  };
+}
+
 /** 직원 질문 규칙(3): 적신호 → 적신호 문서, 약 → 약 문서, 둘 중 하나라도 → 인계 절차 순으로 앞에 둘 문단. */
 function staffPins(index: SearchIndex, rules: StaffPinRules, question: string): { chunk: Chunk; pin: PinReason }[] {
-  const rf = checkRedflags(question, rules.redflag);
-  const med = checkMedication(question, rules.medication);
+  const h = staffRuleHits(index, rules, question);
   const out: { chunk: Chunk; pin: PinReason }[] = [];
-  const add = (docId: string, words: string[], pin: PinReason) => {
-    const c = pickChunk(index, docId, words);
+  const add = (c: Chunk | null, pin: PinReason) => {
     if (c && !out.some((o) => o.chunk.chunkId === c.chunkId)) out.push({ chunk: c, pin });
   };
-  if (rf.decision === "handover") add(rules.redflagDocId, [...rf.matchedSymptoms, ...rf.matchedAmbiguous], "redflag");
-  // 약 말은 발췌 앞세우기용 기준이 게이트보다 좁다(V17 qaPinIgnore — "약도"·"먹어도"만 있으면 약 질문이 아닐 때가 많다).
-  const medTerms = med.matchedTerms.filter((t) => !(rules.medication.qaPinIgnore ?? []).includes(t));
-  if (medTerms.length > 0) add(rules.medicationDocId, medTerms, "medication");
-  // 인계 절차 문서에서는, 적신호면 시한("적신호 문의는 … 5분 안에 인계합니다")이 든 문단을, 약 문의뿐이면 첫 문단("언제 인계하나")을 고른다.
-  // 2회차 G46 검토에서 빠진 핵심이 '5분 안에 인계'였는데, 말 없이 고르면 첫 문단이 와 그 문장이 모델에 가지 않았다(3차 회귀 확인).
-  if (rf.decision === "handover" || medTerms.length > 0) add(rules.handoverDocId, rf.decision === "handover" ? ["적신호"] : [], "handover");
+  add(h.redflagChunk, "redflag");
+  add(h.medicationChunk, "medication");
+  add(h.handoverChunk, "handover");
   return out;
 }
 

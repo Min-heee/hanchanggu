@@ -684,7 +684,8 @@ ul.plain {
   width: 24px;
   flex: none;
 }
-.result-title {
+.result-title,
+.result-top {
   scroll-margin-top: 90px;
 }
 .badge.wrap {

@@ -507,7 +507,6 @@ export function handoverCardModel(
       remaining: info.overdue ? null : `${formatDuration(-over)} 남음`,
     };
   }
-  const msg = policy.patientMessage;
   return {
     urgent: decision.redflag.urgency === "urgent",
     urgencyLabel: decision.redflag.urgency === "urgent" ? "긴급" : "인계",
@@ -520,8 +519,17 @@ export function handoverCardModel(
     openNow: info ? info.openNow : null,
     roleAtDeadline: info && info.overdue && info.roleAtDeadline !== info.role ? info.roleAtDeadline : null,
     deadline,
-    patientMessage: msg ? { text: msg.value, source: `${(msg.chunkId && titles.get(msg.chunkId.split("#")[0])) || "인계 절차 문서"}의 고정 안내 문장` } : null,
+    patientMessage: patientMessageOf(policy, titles),
   };
+}
+
+/**
+ * 인계한 뒤 환자에게 보낼 V12 승인 문구와 출처. 문의함 인계 카드와 사내 Q&A 규칙 카드가 같이 쓴다 —
+ * 두 카드가 출처 표기를 따로 만들면 한쪽만 문구가 바뀐 채 남는다. 읽지 못하면 null(지어내지 않는다).
+ */
+export function patientMessageOf(policy: Pick<HandoverPolicy, "patientMessage">, titles: ReadonlyMap<string, string>): { text: string; source: string } | null {
+  const msg = policy.patientMessage;
+  return msg ? { text: msg.value, source: `${(msg.chunkId && titles.get(msg.chunkId.split("#")[0])) || "인계 절차 문서"}의 고정 안내 문장` } : null;
 }
 
 // ─── 확정 대기(F16) ──────────────────────────────────────────────────────

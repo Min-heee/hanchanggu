@@ -6,15 +6,18 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { analyzeInquiry } from "@/demo/analyze";
+import { analyzeInquiry, analyzeStaffQuestion } from "@/demo/analyze";
 import { DEMO_NOW_MS } from "@/demo/clock";
 import { buildInboxItem } from "@/demo/inbox";
 import { readConfirmPolicy, readHandoverPolicy } from "@/demo/policy";
+import { staffRuleCard } from "@/demo/qa";
 import { handoverCardModel, maskedCaseForInquiry, maskedView, retrievalView } from "@/demo/view";
 import { realBundle, realKnowledge } from "@/demo/__fixtures__/real";
 import { HandoverCard } from "./HandoverCard";
 import { MaskedText } from "./MaskedText";
 import { RetrievalPanel } from "./Pipeline";
+import { QaResult } from "./QaResult";
+import { StaffRuleCard } from "./StaffRuleCard";
 
 const k = realKnowledge();
 const bundle = realBundle();
@@ -82,5 +85,64 @@ describe("개인정보 가림 펼치기", () => {
     expect(html).toContain("AI에 보내지 않음");
     expect(html).not.toContain("AI가 받은 글");
     expect(html).not.toContain("모델이 실제로 받은");
+  });
+});
+
+describe("사내 Q&A 규칙 카드", () => {
+  const G46 = "수술 2주째 환자가 이식 부위에서 고름이 나온다는데 연고 바르라고 해도 돼요?";
+  const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&quot;/g, '"');
+
+  it("걸린 말, 5분 인계 한 줄, V12 문단 원문과 문서 제목, 승인 문구를 찍는다", () => {
+    const html = renderToStaticMarkup(<StaffRuleCard model={staffRuleCard(k, policies.handover, G46)!} />);
+    const t = text(html);
+    expect(t).toContain("이 질문은 환자 증상·약 얘기를 담고 있습니다 — 인계 절차대로 5분 안에 의료진에게 넘기세요.");
+    expect(t).toContain('"고름"');
+    expect(t).toContain(k.chunks.find((c) => c.chunkId === "V12#2")!.text);
+    expect(t).toContain(k.chunks.find((c) => c.chunkId === "V12#1")!.text);
+    expect(t).toContain("출처: 의료진 인계 절차");
+    expect(t).toContain(policies.handover.patientMessage!.value);
+    expect(t).toContain("아래 AI 답과 다르면 이 카드대로 하세요");
+  });
+
+  it("V12 문단을 읽지 못하면 절차를 지어내지 않고 안내만", () => {
+    const model = { ...staffRuleCard(k, policies.handover, G46)!, quotes: [] };
+    const html = renderToStaticMarkup(<StaffRuleCard model={model} />);
+    expect(text(html)).toContain("절차를 지어내지 않습니다");
+  });
+});
+
+describe("사내 Q&A 결과 — 녹화 없이도 규칙 카드", () => {
+  const text = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&quot;/g, '"');
+  const render = (question: string) =>
+    text(
+      renderToStaticMarkup(
+        <QaResult
+          k={k}
+          handoverPolicy={policies.handover}
+          a={analyzeStaffQuestion(k, question)}
+          rec={null}
+          recordingSource="none"
+          drift={[]}
+          inGaps={false}
+          onAddGap={() => {}}
+        />,
+      ),
+    );
+
+  // 적대 검증: 화면이 녹화가 있을 때만 카드를 그리게 바뀌어도 뷰 모델 시험은 통과했다. 결과 묶음을 녹화 없이 그려 본다.
+  it("AI 답이 준비 전이어도 G46에 카드와 '규칙 카드가 우선합니다'가 뜬다", () => {
+    const t = render("수술 2주째 환자가 이식 부위에서 고름이 나온다는데 연고 바르라고 해도 돼요?");
+    expect(t).toContain("AI 초안은 아직 준비 전입니다");
+    expect(t).toContain("의료진 인계 먼저");
+    expect(t).toContain("인계 절차대로 5분 안에 의료진에게 넘기세요");
+    expect(t).toContain("규칙 카드가 우선합니다");
+    // 카드가 결과 맨 위(질문보다 앞)에 있다.
+    expect(t.indexOf("의료진 인계 먼저")).toBeLessThan(t.indexOf("질문"));
+  });
+
+  it("규칙에 안 걸리는 질문에는 카드도 안내도 없다", () => {
+    const t = render("두피 관리 받으면 두피가 붉어지나요?");
+    expect(t).not.toContain("의료진 인계 먼저");
+    expect(t).not.toContain("규칙 카드가 우선합니다");
   });
 });

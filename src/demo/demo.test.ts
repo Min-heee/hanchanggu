@@ -363,6 +363,17 @@ describe("평가 탭(F15) — 녹화 없음", () => {
     expect(m("weak-hold-answerable").denominator).toBe(39); // mustHold=false: answerable 30 + trap 5 + 직원 절차 질문 4
   });
 
+  it("적신호·약이 담긴 직원 질문에 규칙 카드가 떴나: G46(고름+연고)·G47(약 병용) 2/2, AI 답 없이 계산", () => {
+    const c = m("staff-rule-card");
+    expect([c.numerator, c.denominator, c.state, c.basis]).toEqual([2, 2, "computed", "규칙"]);
+    expect(c.failures).toEqual([]);
+    expect(c.note).toContain("카드가 뜬 문항: G46·G47");
+    // 분모도 같은 규칙이 고르므로 '기준 충족'을 달지 않는다. 부정문 오탐은 알려진 한계로 적는다.
+    expect(c.verdict).toEqual({ tone: "neutral", label: "기록만 · 분모도 규칙이 고름" });
+    expect(c.note).toContain("고름 얘기 말고요");
+    expect(metricValue(c)).toBe("2 / 2");
+  });
+
   it("녹화가 필요한 지표는 '녹화 전'이고 숫자를 지어내지 않는다", () => {
     for (const key of ["hold-recall-nosource", "false-hold", "citation-mismatch", "injection"]) {
       expect([key, m(key).state, m(key).numerator]).toEqual([key, "needs-recording", null]);

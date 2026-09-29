@@ -38,7 +38,10 @@ export function analyzeInquiry(k: Knowledge, channel: string, text: string, post
   return { decision, postopRead, postopUsed, retrieval, excerpts: groupHitsByDoc(retrieval.hits, k.titles) };
 }
 
-/** 사내 Q&A(F14). 직원 질문에는 게이트를 돌리지 않는다(인계할 환자·창구가 없다). 가림은 한다. */
+/**
+ * 사내 Q&A(F14). 직원 질문은 게이트로 막지 않는다(인계할 환자·창구가 없다). 가림은 한다.
+ * 적신호·약 말이 있으면 화면이 규칙 카드를 따로 띄운다(src/demo/qa.ts staffRuleCard — 발췌 앞세우기와 같은 판정).
+ */
 export function analyzeStaffQuestion(k: Knowledge, question: string) {
   const mask = maskPii(question);
   const retrieval = retrieve(k.index, "staff-qa", mask.masked);

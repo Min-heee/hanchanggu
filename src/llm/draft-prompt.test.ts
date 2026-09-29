@@ -59,4 +59,15 @@ describe("시스템 지시 — 2회차 녹화 결함", () => {
     expect(p).toContain("날짜를 세는 기준 문장(예: \"날짜는 수술일을 D+0으로 셉니다\")이 문서에 있으면 그 문장도 함께 인용하세요");
     expect(p).toContain("D+몇인지는 계산하지 마세요(규칙 11)");
   });
+
+  it("직원 질문이 증상·약을 다루면 인계 절차(누구에게·몇 분 안에) 문장을 인용하게 한다 — 3회차 G46 답에 '5분 안에 인계'가 빠졌다", () => {
+    // 두 모드 규칙이 같아야 하므로(draft.test.ts) 사내 Q&A 지시에도, 답장 지시에도 같은 문장이 실린다.
+    for (const mode of ["reply", "staff-qa"] as const) {
+      const q = buildSystemPrompt(mode, []);
+      expect(q).toContain("question 값(직원 질문)이 환자의 증상이나 약을 다루고");
+      expect(q).toContain("인계 절차 문장(누구에게 넘기는지, 몇 분 안에 넘기는지)이 있으면 그 문장을 통째로 인용해 답에 넣으세요");
+    }
+    // 지시문에 시한 숫자를 박지 않는다 — 시한은 문서(V12)에서만 와야 문서가 바뀌면 답도 바뀐다.
+    expect(p.slice(p.indexOf("15."))).not.toMatch(/\d+분/);
+  });
 });

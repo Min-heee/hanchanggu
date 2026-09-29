@@ -2,36 +2,24 @@
 
 /**
  * 사내 Q&A(PRD F14). 문의 초안과 같은 엔진(개인정보 가림 → ①문서 찾기 → ②발췌 → ③AI 초안 → ④근거·확인).
- * 직원 질문에는 적신호·약 규칙을 돌리지 않는다 — 인계할 환자·창구가 없고, 절차를 묻는 질문의 정답은
- * 근거를 단 절차 안내다(data/README.md).
+ * 직원 질문은 적신호·약 규칙으로 AI 답을 막지 않는다 — 인계할 환자·창구가 없고, 절차를 묻는 질문의 정답은
+ * 근거를 단 절차 안내다(data/README.md). 대신 규칙에 걸리면 결과 맨 위에 규칙 카드(인계 절차 원문)를 AI 답과 상관없이 띄운다
+ * (src/demo/qa.ts staffRuleCard — 3회차 녹화 G46의 AI 답에 '5분 안에 인계'가 빠졌다). 결과 묶음은 QaResult가 그린다(녹화 없이도 시험하려고 뗐다).
  * ①②는 어떤 질문이든 바로, ③④는 미리 만든 답이 있는 질문만. 문서 빈칸에 쌓을지는 src/demo/qa.ts gapDecision이 정한다.
  * 시연 대본 질문은 맨 위 버튼과 링크(?q=G16)로 연다 — 대본 문장을 손으로 치면 한 글자만 달라도 미리 만든 답이 붙지 않는다.
  */
 
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { Fill } from "@/core/template";
 import { chunkDoc } from "@/core/vault";
 import { analyzeStaffQuestion } from "@/demo/analyze";
 import { DEMO_NOW_MS, formatKst } from "@/demo/clock";
 import { gapDecision, gapEntry, preparedFromParam } from "@/demo/qa";
-import { draftDisplay } from "@/demo/refill";
 import { addGap } from "@/demo/state";
-import {
-  draftSourceLabel,
-  fillSourceChunk,
-  liveExcerpts,
-  maskedCaseForQuestion,
-  maskedView,
-  recordedExcerpts,
-  recordedRetrievalView,
-  replaceWikiLinks,
-  retrievalView,
-} from "@/demo/view";
+import { replaceWikiLinks } from "@/demo/view";
 import { bundle, driftFor, engine, goldenRecord, goldenRecordByQuestion } from "../_lib/data";
 import { useDemoState } from "../_lib/useDemoState";
-import { MaskedText } from "./MaskedText";
-import { DraftPanel, ExcerptPanel, RetrievalPanel, VerifyPanel } from "./Pipeline";
+import { QaResult } from "./QaResult";
 
 const NOW_LABEL = formatKst(DEMO_NOW_MS);
 const STATUS_LABEL = { approved: "승인", draft: "초안(찾기 제외)", superseded: "옛 판(찾기 제외)" } as const;
@@ -50,19 +38,18 @@ interface Asked {
 }
 
 export function QaView() {
-  const { k } = engine();
+  const { k, policies } = engine();
   const { state, update } = useDemoState();
   const params = useSearchParams();
   const [asked, setAsked] = useState<Asked | null>(null);
   const [input, setInput] = useState("");
-  const [highlight, setHighlight] = useState<Set<string>>(new Set());
   const [listOpen, setListOpen] = useState(false);
   const [askSeq, setAskSeq] = useState(0);
   const resultRef = useRef<HTMLHeadingElement>(null);
+  const resultTopRef = useRef<HTMLDivElement>(null);
 
   const ask = (text: string, goldenId: string | null) => {
     setAsked({ text, goldenId });
-    setHighlight(new Set());
     setListOpen(false);
     setAskSeq((n) => n + 1);
     const rec = goldenId ? goldenRecord(goldenId) : goldenRecordByQuestion(text);
@@ -81,34 +68,17 @@ export function QaView() {
   }, [param]);
 
   // 질문을 고르면 결과로 옮겨 간다. 결과가 42개 목록 아래에 그려지면 눌렀는데 아무 일도 없는 것처럼 보였다.
+  // 스크롤은 결과 맨 위(규칙 카드가 있으면 카드)로 — 제목으로 옮기면 그 위의 규칙 카드가 화면 밖으로 밀린다.
   useEffect(() => {
     if (askSeq === 0) return;
-    const el = resultRef.current;
-    el?.scrollIntoView({ block: "start" });
-    el?.focus({ preventScroll: true });
+    resultTopRef.current?.scrollIntoView({ block: "start" });
+    resultRef.current?.focus({ preventScroll: true });
   }, [askSeq]);
 
   const a = asked ? analyzeStaffQuestion(k, asked.text) : null;
   const rec = asked ? (asked.goldenId ? goldenRecord(asked.goldenId) : goldenRecordByQuestion(asked.text)) : null;
   const inGaps = a ? state.gaps.some((g) => g.question === a.mask.masked) : false;
   const drift = asked?.goldenId ? driftFor(asked.goldenId) : [];
-
-  const live = a ? retrievalView(k, a.retrieval, a.mask.masked) : null;
-  const recorded = rec ? recordedRetrievalView(k, { retrieval: rec.retrieval, excludedMatches: rec.excludedMatches, retrievalMeta: rec.retrievalMeta }, "staff-qa", rec.maskedQuestion, null) : null;
-  const liveDiffers = recorded && live && live.items.map((x) => x.chunkId).join() !== recorded.items.map((x) => x.chunkId).join();
-  // 읽는 글은 녹화의 모델 글을 지금 코드로 다시 채운 것이다(src/demo/refill.ts).
-  const display = rec ? draftDisplay(k, rec.draft, "staff-qa") : null;
-  const fillSources = (display?.fills ?? []).map((f) => {
-    const c = fillSourceChunk(k, f);
-    const chunk = c ? k.chunks.find((x) => x.chunkId === c) : undefined;
-    return { fill: f, chunk: chunk ? { chunkId: chunk.chunkId, text: chunk.text } : null };
-  });
-  const onFill = (f: Fill) => {
-    const c = fillSourceChunk(k, f);
-    if (!c) return;
-    setHighlight(new Set([`price:${c}`]));
-    document.getElementById(`price-src-${c}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  };
 
   return (
     <div>
@@ -161,65 +131,20 @@ export function QaView() {
         </details>
       </section>
 
-      {asked && a && live && (
-        <div aria-live="polite">
-          <section className="card">
-            <h2 ref={resultRef} tabIndex={-1} className="result-title">
-              질문
-            </h2>
-            <p className="quote">{a.mask.masked}</p>
-            <MaskedText view={maskedView(maskedCaseForQuestion(rec, a.mask))} />
-            {drift.length > 0 && (
-              <div className="note warn" role="note">
-                <strong>미리 만든 AI 답 이후 바뀐 곳이 있습니다.</strong>
-                <ul className="small">
-                  {drift.map((m, i) => (
-                    <li key={i}>{m}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </section>
-          <RetrievalPanel view={recorded ?? live} compare={liveDiffers ? live : null} />
-          <div className="two-col">
-            <ExcerptPanel
-              docs={rec && rec.draft.documents.length > 0 ? recordedExcerpts(k, rec.draft) : liveExcerpts(k, a.excerpts)}
-              highlight={highlight}
-              source={rec && rec.draft.documents.length > 0 ? "recorded" : "live"}
-              weak={a.retrieval.weak}
-            />
-            <div className="sticky-col">
-              <DraftPanel
-                draft={rec?.draft ?? null}
-                display={display}
-                sourceLabel={rec ? draftSourceLabel(bundle.recordingSource, rec.draft.meta.model, rec.draft.meta.servedByFallback) : ""}
-                onCite={(ids) => {
-                  setHighlight(new Set(ids));
-                  document.getElementById(`para-${ids[0]}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-                }}
-                onFill={onFill}
-                notReadyText={
-                  a.retrieval.weak
-                    ? "근거가 약해 AI를 부르지 않고 보류합니다. 아래 ‘문서 빈칸’에 쌓았습니다."
-                    : bundle.recording
-                      ? "준비된 질문만 AI 초안이 있습니다. 이 질문은 준비되지 않았습니다."
-                      : "AI 초안은 아직 준비 전입니다 — 문서 찾기와 발췌는 지금 동작합니다."
-                }
-              />
-              <VerifyPanel draft={rec?.draft ?? null} display={display} fillSources={fillSources} highlight={highlight} />
-            </div>
-          </div>
-          {inGaps ? (
-            <p className="note small">이 질문은 &lsquo;문서 빈칸&rsquo;에 있습니다(아래).</p>
-          ) : (
-            <p className="row small">
-              <span>발췌에 답이 없나요?</span>
-              <button type="button" onClick={() => update((s) => addGap(s, gapEntry(a.mask, NOW_LABEL, "직원이 근거 없음으로 표시")))}>
-                문서 빈칸에 추가
-              </button>
-            </p>
-          )}
-        </div>
+      {asked && a && (
+        <QaResult
+          key={askSeq}
+          k={k}
+          handoverPolicy={policies.handover}
+          a={a}
+          rec={rec}
+          recordingSource={bundle.recordingSource}
+          drift={drift}
+          inGaps={inGaps}
+          onAddGap={() => update((s) => addGap(s, gapEntry(a.mask, NOW_LABEL, "직원이 근거 없음으로 표시")))}
+          topRef={resultTopRef}
+          titleRef={resultRef}
+        />
       )}
 
       <section className="card" aria-labelledby="gaps-title">
