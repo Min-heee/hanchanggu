@@ -10,11 +10,11 @@ export default function Home() {
     <>
       <section className="intro" aria-label="한창구 소개">
         <p className="wide-only">
-          여러 문의 창구의 문의를 한 목록에 모으고, 병원 문서만 근거로 답장 초안을 만들어 <strong>직원이 검토한 뒤 보내게</strong> 하는 도구입니다. 증상·약
-          문의는 AI보다 안전 규칙이 먼저 잡아 의료진에게 넘깁니다.
+          병원에 들어온 문의에 AI가 병원 안내문과 가격표를 토대로 답장 초안을 쓰면, <strong>직원이 읽어 보고 그대로 보낼지 고쳐서 보낼지</strong> 정합니다.
+          증상·약 문의는 안전 규칙이 먼저 잡아 의료진에게 넘기고, 그 초안은 의료진이 확인해야만 보낼 수 있습니다.
         </p>
         <p className="narrow-only">
-          문의를 한 목록에 모아 답장 초안을 만듭니다.
+          AI가 병원 문서로 답장 초안을 쓰고, 직원이 보낼지 정합니다.
         </p>
         <nav aria-label="30초 둘러보기" className="tour">
           <span className="muted small">30초 둘러보기</span>

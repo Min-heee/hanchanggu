@@ -47,7 +47,7 @@ export function Chrome() {
       <header className="top">
         <div className="brand">
           <h1>한창구</h1>
-          <small>가상 &lsquo;샘플의원&rsquo;의 여러 문의 창구를 한 화면에</small>
+          <small>가상 &lsquo;샘플의원&rsquo;의 문의 답장 초안</small>
         </div>
         <nav className="tabs" aria-label="화면">
           {TABS.map((t) => (
