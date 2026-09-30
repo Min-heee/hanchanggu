@@ -12,7 +12,25 @@ import { readPostopDay } from "../core/postop";
 import { analyzeInquiry, analyzeStaffQuestion } from "./analyze";
 import { DEMO_NOW, DEMO_NOW_MS, formatDuration, formatKst, kstParts, kstToMs } from "./clock";
 import { computeMetrics, metricValue } from "./evaluation";
-import { buildInboxItem, deadlineBadge, filterInbox, filterOptions, inboxRows, inboxSummary, KIND_LABEL, receivedRangeText, sortInbox, STATUS_LABEL, type LocalMarks } from "./inbox";
+import {
+  buildInboxItem,
+  deadlineBadge,
+  filterInbox,
+  filterOptions,
+  HANDOVER_DRAFT_SENT_SHORT,
+  holdShort,
+  inboxRows,
+  inboxSummary,
+  KIND_LABEL,
+  looksLikeInstruction,
+  receivedRangeText,
+  rowBadge,
+  rowDue,
+  rowMeta,
+  sortInbox,
+  STATUS_LABEL,
+  type LocalMarks,
+} from "./inbox";
 import { confirmDeadlineMs, FALLBACK_CONFIRM_BUSINESS_DAYS, isOpenAt, readConfirmPolicy, readHandoverPolicy } from "./policy";
 import { realBundle, realKnowledge, ROOT } from "./__fixtures__/real";
 
@@ -252,13 +270,84 @@ describe("통합 목록(F3) — 녹화 없음", () => {
     expect(filterInbox(all, { channel: null, kind: null, status: "handover-needed" })).toHaveLength(17);
   });
 
+  it("요약 숫자를 누르면 묶음으로 거른다 — 숫자와 거른 건수가 같다(약·분류 인계는 두 유형, 발송한 건 제외)", () => {
+    const marks: LocalMarks = { sent: new Set(["Q01"]), handedOver: new Map() };
+    const all = items(marks);
+    const sum = inboxSummary(all);
+    const g = (group: 0 | 1 | 2) => filterInbox(all, { channel: null, kind: null, status: null, group });
+    expect([g(0).length, g(1).length, g(2).length]).toEqual([sum.redflag, sum.otherHandover, sum.deposit]);
+    expect(g(2).map((i) => i.id)).not.toContain("Q01");
+    expect(filterInbox(all, { channel: null, kind: null, status: null, group: null })).toHaveLength(41);
+  });
+
+  it("행 배지는 하나이고 할 일을 글자로: 적신호는 칠한 빨강, 약·AI 분류 인계는 테두리 빨강, 예약금은 주황, 초안 상태는 보조 줄로", () => {
+    const by = new Map(items().map((i) => [i.id, i]));
+    expect(rowBadge(by.get("Q06")!)).toEqual({ tone: "red", text: "적신호 · 인계 필요", detail: null });
+    expect(rowBadge(by.get("Q25")!)).toEqual({ tone: "red-line", text: "약 문의 · 인계 필요", detail: null });
+    // 녹화 없음: 초안 경로는 AI 답 전이라 '새 문의'.
+    expect(rowBadge(by.get("Q41")!)).toEqual({ tone: "orange", text: "예약금 확정 대기", detail: "새 문의" });
+    expect(rowBadge(by.get("Q04")!)).toEqual({ tone: "neutral", text: "공개 창구", detail: "고정 문구 고르기" });
+    // 인계함·발송은 무채색이고, 원래 유형은 배지 글자나 보조 줄로 남는다.
+    const handed = items({ sent: new Set(["Q02"]), handedOver: new Map([["Q06", DEMO_NOW_MS]]) });
+    expect(rowBadge(handed.find((i) => i.id === "Q06")!)).toEqual({ tone: "neutral", text: "적신호 · 인계함", detail: null });
+    expect(rowBadge(handed.find((i) => i.id === "Q02")!)).toEqual({ tone: "neutral", text: "발송함", detail: "일반 문의" });
+    // 모든 행에서 배지 글자가 비지 않는다(색만으로 뜻을 전하지 않음).
+    for (const it of items()) expect(rowBadge(it).text.length, it.id).toBeGreaterThan(1);
+  });
+
+  it("지시문이 섞인 문의는 초록 '초안 준비' 대신 '지시문 섞임 · 확인'(정답 라벨은 읽지 않고 글에서 찾는다)", () => {
+    const hits = bundle.inquiries.filter((q) => looksLikeInstruction(q.text)).map((q) => q.id);
+    // 데이터의 지시문 문의(라벨 prompt-injection)와 같고, 다른 문의는 걸리지 않는다.
+    expect(hits).toEqual(bundle.inquiries.filter((q) => q.labels.type === "prompt-injection").map((q) => q.id));
+    expect(hits).toEqual(["Q10", "Q29"]);
+    const q29 = items().find((i) => i.id === "Q29")!;
+    expect(rowBadge(q29)).toMatchObject({ tone: "line", text: "지시문 섞임 · 확인" });
+    expect(rowBadge(q29).detail).toContain(KIND_LABEL[q29.kind]);
+  });
+
+  it("보류 배지는 이유를 짧게 단다(무엇을 풀면 되는지)", () => {
+    const withCode = (code: string) => holdShort({ step: "draft", decision: { holdReason: null }, record: { route: { holdReason: null }, draft: { holdReasons: [{ code, detail: "" }] } } } as never);
+    expect(withCode("no-evidence")).toBe("문서 빈칸");
+    expect(withCode("weak-retrieval")).toBe("문서 빈칸");
+    expect(withCode("api-error")).toBe("AI 답 없음");
+    expect(withCode("invalid-citation")).toBe("검증 걸림");
+    expect(holdShort({ step: "draft", decision: { holdReason: null }, record: null } as never)).toBe("AI 답 없음");
+    expect(holdShort({ step: "hold", decision: { holdReason: "창구 지도에 없는 창구입니다: fax" }, record: null } as never)).toBe("창구 모름");
+    expect(holdShort({ step: "hold", decision: { holdReason: "분류하지 못해 초안을 만들지 않습니다: x" }, record: null } as never)).toBe("분류 못함");
+  });
+
+  it("오른쪽 칸은 시한(지났으면 over) 또는 기다린 시간, 보조 줄은 오른쪽 칸과 겹치지 않게", () => {
+    const by = new Map(items().map((i) => [i.id, i]));
+    expect(rowDue(by.get("Q06")!, DEMO_NOW_MS)).toEqual({ text: "인계 시한 1일 12시간 지남", over: true, wait: false });
+    expect(rowDue(by.get("Q01")!, DEMO_NOW_MS)).toEqual({ text: "확정 연락 9시간 남음", over: false, wait: false });
+    // Q02: 시한이 없는 건은 얼마나 기다렸는지(토 18:20 받음 → 월 10:00).
+    expect(rowDue(by.get("Q02")!, DEMO_NOW_MS)).toEqual({ text: `${formatDuration(by.get("Q02")!.waitMinutes)} 기다림`, over: false, wait: true });
+    const meta = (id: string, marks?: LocalMarks, drift = false) =>
+      rowMeta(items(marks).find((i) => i.id === id)!, { channel: "창구", drift, nowMs: DEMO_NOW_MS }).map((m) => m.text);
+    expect(meta("Q06")).toEqual(["Q06", "창구", "받음 9/19(토) 21:14", "기다린 시간 1일 12시간", "첨부 1"]);
+    expect(meta("Q02").some((t) => t.startsWith("기다린 시간"))).toBe(false); // 오른쪽 칸에 이미 있다
+    // 발송한 건은 오른쪽 칸이 비고, 기다린 시간은 보조 줄에 남는다.
+    expect(rowDue(items({ sent: new Set(["Q02"]), handedOver: new Map() }).find((i) => i.id === "Q02")!, DEMO_NOW_MS)).toBeNull();
+    expect(meta("Q02", { sent: new Set(["Q02"]), handedOver: new Map() }).some((t) => t.startsWith("기다린 시간"))).toBe(true);
+    // 인계 초안을 보낸 인계 건: 그 표시가 한 조각으로(조각 안에 ' · '가 없어 경계가 흐려지지 않게), AI 답 이후 바뀜은 경고 조각.
+    const sent = rowMeta(items({ sent: new Set(["Q06"]), handedOver: new Map() }).find((i) => i.id === "Q06")!, { channel: "창구", drift: true, nowMs: DEMO_NOW_MS });
+    expect(sent.map((m) => m.text)).toContain(HANDOVER_DRAFT_SENT_SHORT);
+    expect(sent.at(-1)).toEqual({ text: "AI 답 이후 바뀜", warn: true });
+    for (const it of items()) for (const m of rowMeta(it, { channel: "창구", drift: false, nowMs: DEMO_NOW_MS })) expect(m.text, it.id).not.toContain(" · ");
+    // 지시문 섞인 인계 건(Q10이 인계로 가면)이나 배지로 못 담은 건은 보조 줄에 경고 조각을 단다.
+    const q10 = items().find((i) => i.id === "Q10")!;
+    const q10meta = rowMeta(q10, { channel: "창구", drift: false, nowMs: DEMO_NOW_MS });
+    expect(rowBadge(q10).tone === "line" || q10meta.some((m) => m.warn && m.text === "지시문 섞임")).toBe(true);
+  });
+
   it("시한 배지는 넘긴 양까지 적는다(행끼리 구분되게)", () => {
     const by = new Map(items().map((i) => [i.id, i]));
     // Q06: 토 21:14 받음 → 21:19 시한 → 월 10:00 = 1일 12시간 41분 지남(하루가 넘으면 분은 버림).
     expect(deadlineBadge(by.get("Q06")!, DEMO_NOW_MS)).toEqual({ tone: "red", text: "인계 시한 1일 12시간 지남" });
-    expect(deadlineBadge(by.get("Q01")!, DEMO_NOW_MS)).toEqual({ tone: "orange", text: "예약금 받음 · 확정 연락 9시간 남음" });
+    // 예약금 건은 행 배지가 '예약금 확정 대기'라 시한 글에 '예약금 받음'을 되풀이하지 않는다.
+    expect(deadlineBadge(by.get("Q01")!, DEMO_NOW_MS)).toEqual({ tone: "orange", text: "확정 연락 9시간 남음" });
     // Q41: 금 16:40 받음 → 토 15:00 시한 → 월 10:00 = 43시간 지남(30초 시연 0~5초 장면의 배지).
-    expect(deadlineBadge(by.get("Q41")!, DEMO_NOW_MS)).toEqual({ tone: "red", text: "예약금 받음 · 확정 연락 시한 1일 19시간 지남" });
+    expect(deadlineBadge(by.get("Q41")!, DEMO_NOW_MS)).toEqual({ tone: "red", text: "확정 연락 시한 1일 19시간 지남" });
     expect(deadlineBadge(by.get("Q02")!, DEMO_NOW_MS)).toBeNull();
     const texts = items()
       .filter((i) => i.group === 0)
@@ -290,7 +379,7 @@ describe("통합 목록(F3) — 녹화 없음", () => {
   it("적신호 묶음은 접으면 2건만 보이고, 그 아래 약 인계·확정 대기가 바로 이어진다", () => {
     const rows = inboxRows(items(), { collapseRedflag: true });
     const firstTen = rows.slice(0, 10).map((r) => (r.type === "item" ? r.item.id : r.type === "more" ? `+${r.hidden}` : r.text));
-    expect(firstTen).toEqual(["적신호 인계", "Q06", "Q07", "+14", "약·분류 인계", "Q25", "예약금 받음 · 확정 대기", "Q41", "Q01", "Q15"]);
+    expect(firstTen).toEqual(["적신호 인계", "Q06", "Q07", "+14", "약·분류 인계", "Q25", "예약금 확정 대기", "Q41", "Q01", "Q15"]);
     expect(inboxRows(items(), { collapseRedflag: false }).filter((r) => r.type === "item")).toHaveLength(41);
   });
 });

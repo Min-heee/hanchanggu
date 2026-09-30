@@ -4,7 +4,7 @@
  * 직접 해 보기(PRD 3절 12~20초). 입력한 문장을 개인정보 가림 → 안전 규칙 → 문서 찾기까지 브라우저에서 바로 돌린다.
  * AI 초안(③)은 준비된 질문에만 있다 — 입력한 문장으로 AI를 부르지 않는다(방문자 비용 0, PRD F18).
  * 인계 카드도 같다: 준비된 인계 문의에는 의료진 확인용 AI 초안(PRD v0.3)이 붙지만, 직접 넣은 문장에는 카드만 뜬다.
- * 첫 화면을 차지하지 않게 한 줄 입력과 예시만 두고, 결과는 누른 뒤에 펼친다.
+ * 첫 화면은 통합 목록이 먼저라 이 칸은 목록 아래에 둔다(30초 둘러보기 ③ #tryit으로 바로 온다). 한 줄 입력과 예시만 두고, 결과는 누른 뒤에 펼친다.
  */
 
 import { useState } from "react";
@@ -46,9 +46,12 @@ export function TryIt() {
           run(text);
         }}
       >
-        <h2 id="tryit-title" className="tryit-title" title="환자 문의 문장을 넣으면 개인정보 가림 → 안전 규칙 → 문서 찾기가 이 브라우저에서 바로 돕니다. AI는 부르지 않습니다.">
-          직접 해 보기
-        </h2>
+        <div className="tryit-head">
+          <h2 id="tryit-title" className="tryit-title">
+            직접 해 보기
+          </h2>
+          <p className="small muted">환자 문의 문장을 넣으면 개인정보 가림 → 안전 규칙 → 문서 찾기가 이 브라우저에서 바로 돕니다. AI는 부르지 않습니다.</p>
+        </div>
         <label style={{ flex: "1 1 240px" }}>
           <span className="sr-only">환자 문의 문장(AI 호출 없이 안전 규칙과 문서 찾기만 돕니다)</span>
           <input value={text} onChange={(e) => setText(e.target.value)} />

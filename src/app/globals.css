@@ -26,8 +26,8 @@
   --blue-bg: #e6eefb;
   --mark: #fff0a8;
 
-  --band-bg: #2b2a27;
-  --band-text: #ffffff;
+  --band-bg: #e9e7df;
+  --band-text: #1c1c1a;
   --radius: 10px;
   color-scheme: light;
 }
@@ -54,8 +54,8 @@
     --blue: #b0c8f5;
     --blue-bg: #1b2a44;
     --mark: #5c4f10;
-    --band-bg: #000000;
-    --band-text: #ffffff;
+    --band-bg: #262622;
+    --band-text: #efeee9;
     color-scheme: dark;
   }
 }
@@ -104,14 +104,18 @@ p {
   margin: 0 0 8px;
 }
 
-/* 상단 띠: 가상 의원·합성 데이터·미리 생성한 AI 응답을 항상 보인다(PRD 3절). */
+/*
+ * 상단 띠: 가상 의원·합성 데이터·미리 생성한 AI 응답을 항상 보인다(PRD 3절).
+ * 검은 띠는 화면에서 가장 센 덩어리라 목록보다 먼저 눈을 끌었다. 문구는 그대로 두고 옅은 띠로 낮춘다.
+ */
 .band {
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--band-bg);
   color: var(--band-text);
-  font-size: 0.85rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.8rem;
   padding: 6px 16px;
   display: flex;
   flex-wrap: wrap;
@@ -301,63 +305,172 @@ label {
   color: var(--gray);
   border-color: transparent;
 }
+/* 목록 행 배지: 약 문의·AI 분류 인계는 적신호보다 한 단계 약하게(테두리만), 지시문 섞임은 무채색 테두리. */
+.badge.red-line {
+  background: transparent;
+  color: var(--red);
+  border-color: var(--red);
+}
+.badge.line {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--text);
+}
 
-/* 통합 목록 */
+/*
+ * 통합 목록. 한 행 = 상태 배지 하나(색은 여기에만) + 문의 원문 + 오른쪽 칸(시한 또는 기다린 시간) + 옅은 보조 줄.
+ * 시한 지남은 빨강이 아니라 진한 글자로 둔다 — 빨간 배지 옆에 빨간 글자가 또 붙으면 위쪽 인계 행이 전부 빨간 덩어리가 된다.
+ * 행 배경색·묶음 색 띠·상자 테두리 없이, 행 사이 선 하나로만 나눈다. 묶음은 제목과 순서로 나눈다.
+ */
+.inbox-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
 ul.inbox {
   list-style: none;
   padding: 0;
   margin: 0;
 }
-ul.inbox li {
-  margin-bottom: 8px;
+ul.inbox li:not(.group-title) {
+  border-bottom: 1px solid var(--line);
 }
 ul.inbox a.item {
-  display: block;
+  display: grid;
+  /* 배지 칸은 가장 긴 배지("AI 분류 · 인계 필요")에 맞춘다 — 넓으면 배지와 원문 사이가 비어 눈이 끊긴다. */
+  grid-template-columns: 7.5rem minmax(0, 1fr) auto;
+  grid-template-areas:
+    "badge text due"
+    "badge meta due";
+  column-gap: 14px;
+  row-gap: 2px;
+  align-items: start;
   min-height: 44px;
+  padding: 10px 8px;
   text-decoration: none;
   color: inherit;
+  border-radius: 6px;
+}
+ul.inbox a.item:hover {
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-left: 6px solid var(--line);
-  border-radius: var(--radius);
-  padding: 8px 12px;
 }
-ul.inbox a.item.g0 {
-  border-left-color: var(--red);
-  background: linear-gradient(90deg, var(--red-bg), var(--surface) 40%);
-}
-ul.inbox a.item.g1 {
-  border-left-color: var(--red);
-  background: linear-gradient(90deg, var(--red-bg), var(--surface) 25%);
-}
-ul.inbox a.item.g2 {
-  border-left-color: var(--orange);
-  background: linear-gradient(90deg, var(--orange-bg), var(--surface) 40%);
-}
-ul.inbox .meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  align-items: center;
-  font-size: 0.85rem;
-  color: var(--muted);
-}
-ul.inbox .meta .when {
-  margin-left: auto;
-  font-size: 0.8rem;
+ul.inbox .item-badge {
+  grid-area: badge;
+  padding-top: 2px;
 }
 ul.inbox .text {
-  margin: 4px 0 0;
+  grid-area: text;
+  margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-ul.inbox li.group-title {
-  font-size: 0.9rem;
-  color: var(--muted);
-  margin: 10px 0 4px;
+ul.inbox .due {
+  grid-area: due;
+  font-size: 0.85rem;
+  color: var(--text);
+  white-space: nowrap;
+  padding-top: 2px;
+}
+ul.inbox .due.over {
   font-weight: 700;
+}
+ul.inbox .due.wait {
+  color: var(--muted);
+}
+ul.inbox .item-meta {
+  grid-area: meta;
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+/* 보조 줄 한 조각은 줄바꿈으로 가르지 않는다("1일 11시간"이 두 줄로 갈라지지 않게). 줄은 조각 사이 ' · '에서만 바뀐다. */
+ul.inbox .item-meta .m {
+  white-space: nowrap;
+}
+ul.inbox .item-meta .m.warn {
+  color: var(--text);
+  font-weight: 600;
+}
+ul.inbox li.group-title {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--text);
+  margin: 20px 0 0;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--line);
+}
+ul.inbox li.group-title:first-child {
+  margin-top: 8px;
+}
+ul.inbox li.group-title .count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* 목록 위 요약: 큰 숫자 넷. 누르면 그 묶음만 거른다. 색은 '시한 지남' 글자에만. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+button.stat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "label label"
+    "num note";
+  align-items: baseline;
+  justify-content: stretch;
+  column-gap: 10px;
+  min-height: 44px;
+  padding: 8px 14px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+button.stat:hover {
+  border-color: var(--accent);
+}
+/* 누른 묶음만 테두리로 표시한다. 아무것도 거르지 않은 '전체'는 강조하지 않는다(한 번에 하나만 눈에 띄게). */
+button.stat.group[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.stat-label {
+  grid-area: label;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.stat-num {
+  grid-area: num;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.stat-num small {
+  font-size: 0.9rem;
+  font-weight: 400;
+  margin-left: 2px;
+  color: var(--muted);
+}
+.stat-note {
+  grid-area: note;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.stat-note.over {
+  color: var(--text);
+  font-weight: 700;
+}
+.inbox-note {
+  margin-bottom: 4px;
 }
 
 .filters {
@@ -627,19 +740,28 @@ table.metrics td {
   min-height: 44px;
   display: inline-flex;
   align-items: center;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  text-decoration: none;
-  font-size: 0.9rem;
+  padding: 0 6px;
+  font-size: 0.875rem;
+  text-underline-offset: 3px;
 }
+/* 직접 해 보기: 목록 아래. 제목과 한 줄 설명, 그 아래 한 줄 입력. */
 .card.tryit {
   padding: 10px 14px;
+  margin-top: 24px;
+}
+.tryit-head {
+  flex-basis: 100%;
+}
+.tryit-head p {
+  margin: 0;
 }
 .tryit-title {
   font-size: 1rem;
   margin: 0;
+}
+.narrow-only,
+.narrow-only-inline {
+  display: none;
 }
 .card.tryit input {
   width: 100%;
@@ -670,9 +792,18 @@ button.link {
 }
 button.more {
   width: 100%;
-  border-style: dashed;
-  color: var(--red);
-  font-weight: 700;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  justify-content: flex-start;
+  padding: 0 8px;
+}
+button.more:hover {
+  text-decoration: underline;
+}
+button.fold-back {
+  margin-top: 8px;
 }
 ul.plain {
   list-style: none;
@@ -725,29 +856,31 @@ nav.tabs details.records > summary {
 details.filters-fold > summary {
   font-weight: 400;
 }
-.summary-row {
-  margin-bottom: 4px;
-}
 
 @media (max-width: 600px) {
   /* 휴대폰 첫 화면에 목록이 들어오게: 보조 문구를 숨기고, 칩 줄은 가로로 밀어 보게 한다(페이지 가로 스크롤은 생기지 않음). */
   .wide-only {
     display: none !important;
   }
-  .tour,
+  .narrow-only {
+    display: block;
+  }
+  .narrow-only-inline {
+    display: inline;
+  }
+  /* 둘러보기는 줄을 바꿔 다섯 개가 다 보이게 한다. 예시 칩 줄은 가로로 밀어 본다. */
+  .tour {
+    column-gap: 2px;
+  }
   .chips {
     flex-wrap: nowrap !important;
     overflow-x: auto;
     max-width: 100%;
   }
   .tour a,
-  .tour > span,
   button.chip {
     white-space: nowrap;
     flex: none;
-  }
-  .tryit-title {
-    flex-basis: 100%;
   }
   .card.tryit form > label {
     flex: 1 1 150px !important;
@@ -758,15 +891,43 @@ details.filters-fold > summary {
   nav.tabs a {
     padding: 0 10px;
   }
-  button.summary {
-    font-size: 0.85rem;
-    padding: 0 10px;
+  /* 요약 넷을 한 줄에: 라벨은 짧은 이름만, 시한 지남은 묶음 제목에 있으니 여기서는 숨긴다(이름(aria-label)에는 남는다). */
+  .stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+  button.stat {
+    grid-template-areas:
+      "label label"
+      "num num";
+    padding: 6px 8px;
+  }
+  .stat-label {
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .stat-num {
+    font-size: 1.4rem;
+  }
+  .stat-note {
+    display: none;
+  }
+  ul.inbox a.item {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      "badge due"
+      "text text"
+      "meta meta";
+    row-gap: 4px;
+    padding: 10px 4px;
+  }
+  ul.inbox .due {
+    justify-self: end;
+    text-align: right;
+    white-space: normal;
   }
   ul.inbox .text {
     -webkit-line-clamp: 2;
-  }
-  ul.inbox .meta .when {
-    margin-left: 0;
   }
   .band {
     font-size: 0.78rem;
@@ -778,20 +939,4 @@ details.filters-fold > summary {
   .top .brand small {
     display: none;
   }
-}
-
-/* 목록 요약 버튼. 색과 함께 글자로 종류를 적는다. */
-button.summary {
-  border-left: 6px solid var(--line);
-  font-weight: 700;
-}
-button.summary.red {
-  border-left-color: var(--red);
-  background: var(--red-bg);
-  color: var(--red);
-}
-button.summary.orange {
-  border-left-color: var(--orange);
-  background: var(--orange-bg);
-  color: var(--orange);
 }

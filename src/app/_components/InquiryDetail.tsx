@@ -415,7 +415,7 @@ function DepositCard({ id }: { id: string }) {
   const basis = depositBasis(k, intent);
   return (
     <section className={`card ${d.overdue ? "alert" : "warn"}`} aria-label="예약금 확정 대기">
-      <h2>예약금 받음 · 확정 대기</h2>
+      <h2>예약금 확정 대기</h2>
       <dl className="kv">
         <dt>확정 연락 시한</dt>
         <dd>

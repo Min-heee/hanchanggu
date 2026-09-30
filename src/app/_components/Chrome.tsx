@@ -4,6 +4,8 @@
  * 모든 화면 위의 띠와 탭, 그리고 이 브라우저의 시연 기록. 띠는 스크롤해도 보인다 — 방문자가 어느 화면을 캡처해도
  * 가상 의원·합성 데이터라는 것과 AI 초안이 준비됐는지, "사람이 검토 후 발송"이 함께 찍히게(PRD 3절·10절).
  * 띠 문구는 src/demo/view.ts bandText가 정한다(미리 만든 AI 답이 없으면 없다고 쓴다).
+ * 미리 만든 AI 답이 있을 때 모델 이름·생성 날짜는 띠에 글로 쓰지 않고 풀이(title)로만 둔다 — 상담실 화면에는 필요 없는 말이고,
+ * 문의 상세의 ③ 칸 머리에 모델이 적힌다. AI 답이 아직 없거나 가짜일 때는 그 사실이 캡처에 찍혀야 하므로 글로 쓴다.
  */
 
 import Link from "next/link";
@@ -24,18 +26,21 @@ export function Chrome() {
   const path = usePathname();
   const active = (href: string) => (href === "/" ? path === "/" || path.startsWith("/inquiry") : path.startsWith(href));
   const band = bandText(bundle);
+  const aiInTitle = !band.fake && Boolean(bundle.recording);
   const blocked = useStorageBlocked();
   const { state } = useDemoState();
   const count = state.log.length + state.gaps.length;
   return (
     <>
       <div className="band" role="note" aria-label="시연 안내">
-        <span>
+        <span title={aiInTitle ? band.ai : undefined}>
           <strong>{band.main}</strong> · AI 초안은 사람이 검토 후 발송
         </span>
         <span>
-          {band.fake ? <span className="fake">{band.ai}</span> : band.ai}
-          <span className="band-now"> · 기준 시각 {formatKst(DEMO_NOW_MS)}</span>
+          {band.fake ? <span className="fake">{band.ai}</span> : aiInTitle ? null : band.ai}
+          <span className="band-now">
+            {aiInTitle ? "" : " · "}기준 시각 {formatKst(DEMO_NOW_MS)}
+          </span>
         </span>
         {blocked && <span className="fake">이 브라우저는 기록을 저장하지 않습니다 — 새로 고치면 사라집니다</span>}
       </div>
