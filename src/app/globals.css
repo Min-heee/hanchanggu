@@ -556,6 +556,15 @@ table.metrics td {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
 }
+/* 인계 카드 안의 의료진 확인용 AI 초안(PRD v0.3). 카드 속 카드가 답답하지 않게 위에 선만 긋는다. */
+.handover-draft {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+.handover-draft .card {
+  margin-bottom: 8px;
+}
 .two-col {
   display: grid;
   gap: 12px;

@@ -303,6 +303,48 @@ describe("verifyCitations — 인용 문장이 없는 초안(no-cited)", () => {
   });
 });
 
+describe("verifyCitations — 인계 초안의 맨 앞 되짚기(leadingRecap, 오너 두 번째 결정)", () => {
+  const recap = t("수술 9일째 고름이 나온다고 말씀 주셨습니다. ");
+  const cited = t("이상하면 의원으로 연락합니다.", [cite(0, 2, 3, "이상하면 의원으로 연락합니다.")]);
+
+  it("켜면 첫 문장의 인용 없는 문장만 recap(되짚기 후보)으로 두고 통과시킨다 — 받을지는 인계 초안 검사가 본다", () => {
+    const r = verifyCitations([recap, cited], DOCS, ALLOWED, TONE, { leadingRecap: true });
+    expect([r.status, r.sentences.map((x) => x.kind)]).toEqual(["ok", ["recap", "cited"]]);
+    expect(r.sentences[0].problems).toEqual([]);
+  });
+
+  it("끄면(reply·staff-qa) 그대로 uncited-sentence 보류", () => {
+    const r = verifyCitations([recap, cited], DOCS, ALLOWED, TONE);
+    expect([r.status, r.reasons.map((x) => x.code)]).toEqual(["hold", ["uncited-sentence"]]);
+  });
+
+  it("맨 앞이 아니거나 둘째 인용 없는 문장은 켜도 보류 — 되짚기는 첫 문장 하나뿐", () => {
+    expect(verifyCitations([cited, t(" 수술 9일째라고 말씀 주셨습니다.")], DOCS, ALLOWED, TONE, { leadingRecap: true }).reasons.map((x) => x.code)).toEqual(["uncited-sentence"]);
+    expect(verifyCitations([recap, t("괜찮습니다. "), cited], DOCS, ALLOWED, TONE, { leadingRecap: true }).reasons.map((x) => x.code)).toEqual(["uncited-sentence"]);
+    // 인사 문장이 앞에 오면 되짚기는 둘째 문장이라 받지 않는다.
+    const greeted = verifyCitations([t("안녕하세요, 샘플의원입니다. "), recap, cited], DOCS, ALLOWED, TONE, { leadingRecap: true });
+    expect([greeted.sentences.map((x) => x.kind), greeted.reasons.map((x) => x.code)]).toEqual([["allowlisted", "uncited", "cited"], ["uncited-sentence"]]);
+  });
+
+  it("되짚기만 있고 인용 문장이 없으면 no-cited", () => {
+    const r = verifyCitations([recap], DOCS, ALLOWED, TONE, { leadingRecap: true });
+    expect(r.reasons.map((x) => x.code)).toEqual(["no-cited"]);
+  });
+
+  // 2026-09-30 적대 검증: 틀 주어 자리(13자)에 내원 지시("바로 오시면 되는 시간은")가 들어간 자리표시자 문장이 인용 없이 통과했다.
+  it("켜면 인용 없는 자리표시자 문장(template)을 받지 않는다 — 둘째 문장부터는 uncited-sentence, 맨 앞이면 되짚기 후보(인계 초안 검사가 칸을 막는다)", () => {
+    const tmpl = t(" 바로 오시면 되는 시간은 {{hours}}입니다.");
+    const on = verifyCitations([cited, tmpl], DOCS, ALLOWED, TONE, { leadingRecap: true });
+    expect([on.reasons.map((x) => x.code), on.sentences.map((x) => x.kind)]).toEqual([["uncited-sentence"], ["cited", "uncited"]]);
+    expect(on.reasons[0].detail).toContain("인계 초안은 인용 없는 자리표시자 문장을 받지 않습니다");
+    const first = verifyCitations([t("진료시간은 {{hours}}입니다. "), cited], DOCS, ALLOWED, TONE, { leadingRecap: true });
+    expect(first.sentences.map((x) => x.kind)).toEqual(["recap", "cited"]);
+    // 끄면(reply·staff-qa) 전처럼 틀 문장으로 받는다.
+    const off = verifyCitations([cited, t(" 진료시간은 {{hours}}입니다.")], DOCS, ALLOWED, TONE);
+    expect([off.status, off.sentences.map((x) => x.kind)]).toEqual(["ok", ["cited", "template"]]);
+  });
+});
+
 describe("verifyCitations — 6자 이하 이음말에 숨긴 결론", () => {
   // 적대 검증(2026-09-29)에서 HEAD부터 통과하던 우회로. 글자 수(6자)만 보면 들어간다.
   const V04x: SentDocument = {

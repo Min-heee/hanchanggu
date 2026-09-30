@@ -8,7 +8,8 @@
  * - 정답: expectedDocs 중 하나라도 상위 5개 안에 들면 적중. 문단 기준(상위 5개 문단)과 문서 기준(상위 5개 문서)을 함께 적는다.
  *   '정답 문단@5'는 더 엄격하다: 정답 문서의 아무 문단이 아니라 expectedEvidence 원문 조각이 든 문단이 상위 5개 문단에 있어야 한다
  *   (평가 탭 '정답 문단 적중'과 같은 evidenceChunks).
- * - 인계가 정답인 문항(mustHandover)은 초안을 만들지 않으므로 검색을 하지 않는다. 그래서 따로 적는다.
+ * - 인계가 정답인 문항(mustHandover)은 이 검색을 하지 않는다(의료진 확인용 인계 초안은 고정 안내·즉시 조치 문단만 받는 인계 발췌로 따로 찾는다 —
+ *   core/retrieve.ts retrieveForHandover). 그래서 따로 적는다.
  */
 
 import { readFileSync } from "node:fs";

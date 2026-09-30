@@ -9,7 +9,7 @@ import { recordingDrift } from "./drift";
 import { DEMO_AS_OF, DEMO_NOW_MS } from "./clock";
 import { computeMetrics } from "./evaluation";
 import { buildFakeRecording, FAKE_MODEL } from "./fake-recording";
-import { buildInboxItem, sortInbox } from "./inbox";
+import { buildInboxItem, inboxSummary, sortInbox } from "./inbox";
 import { readConfirmPolicy, readHandoverPolicy } from "./policy";
 import { parseDemoRecording, type DemoRecording } from "./recording";
 import { realBundle, realInputs, realKnowledge } from "./__fixtures__/real";
@@ -35,13 +35,56 @@ describe("가짜 녹화 → 녹화 형식 파서", () => {
     expect(r.value.golden.map((g) => g.id)).toEqual(golden.filter((g) => g.kind === "staff-qa").map((g) => g.id));
   });
 
-  it("모델을 부르는 건 규칙을 통과한 초안 경로뿐이다(인계·공개 창구엔 분류도 초안도 없다)", async () => {
+  it("분류는 규칙을 통과한 초안 경로만 — 인계·공개 창구엔 분류도 직원이 보낼 초안(draft)도 없다", async () => {
     const r = parseDemoRecording(await fakeJson());
     if (!r.ok) throw new Error(r.errors.join("\n"));
     const q06 = r.value.inquiries.find((q) => q.id === "Q06")!;
     expect([q06.route.step, q06.classification, q06.draft, q06.postopDay]).toEqual(["handover", null, null, 9]);
     const q04 = r.value.inquiries.find((q) => q.id === "Q04")!;
-    expect([q04.route.step, q04.classification]).toEqual(["public-template", null]);
+    expect([q04.route.step, q04.classification, q04.draft, q04.handoverDraft]).toEqual(["public-template", null, null, null]);
+    // 인계 문의는 늘 draft null — 의료진 확인용 초안은 handoverDraft에만 있어 직원 발송 경로와 섞이지 않는다.
+    expect(r.value.inquiries.filter((x) => x.route.step === "handover").every((x) => x.draft === null)).toBe(true);
+  });
+
+  it("인계 문의(Q06)에는 의료진 확인용 초안(PRD v0.3): 인계 문서 묶음만 인용하고, 첫 문서 블록이 V12 고정 안내 문단", async () => {
+    const r = parseDemoRecording(await fakeJson());
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const hd = r.value.inquiries.find((q) => q.id === "Q06")!.handoverDraft!;
+    expect(hd.draft.status).toBe("ok");
+    expect(hd.draft.documents.every((d) => k.handoverAllowedDocIds.has(d.docId))).toBe(true);
+    expect(hd.draft.documents[0].blocks[0].chunkId).toBe(k.index.rules!.handoverDraft!.fixedChunkId);
+    // V12에서는 고정 안내 문단 하나만 보낸다(나머지는 직원이 할 일).
+    expect(hd.draft.documents.find((d) => d.docId === "V12")!.blocks.map((b) => b.chunkId)).toEqual(["V12#4"]);
+    expect(hd.retrieval[0]).toMatchObject({ chunkId: "V12#4", pin: "handover" });
+    expect(hd.maskedText).toBe(r.value.inquiries.find((q) => q.id === "Q06")!.route.maskedText);
+    // 통과한 초안은 고정 안내 문장을 인용한다.
+    expect(hd.draft.sentences.some((x) => x.citations.some((c) => c.chunkIds.includes("V12#4")))).toBe(true);
+  });
+
+  it("의료진 확인용 초안은 인계 경로이고 직원이 보낼 초안(draft)이 없는 기록에만 — 아니면 파일 모양 오류로 멈춘다", async () => {
+    type Rec = { id: string; draft: unknown; handoverDraft?: unknown };
+    const json = (await fakeJson()) as { inquiries: Rec[] };
+    const hd = json.inquiries.find((x) => x.id === "Q06")!.handoverDraft;
+    const q02Draft = json.inquiries.find((x) => x.id === "Q02")!.draft;
+    expect(q02Draft).not.toBeNull();
+    const onDraftPath = JSON.parse(JSON.stringify(json)) as { inquiries: Rec[] };
+    onDraftPath.inquiries.find((x) => x.id === "Q02")!.handoverDraft = hd;
+    const r1 = parseDemoRecording(onDraftPath);
+    expect(r1.ok).toBe(false);
+    if (!r1.ok) expect(r1.errors.join("\n")).toContain("의료진 확인용 초안은 인계 경로에만 있어야 합니다(지금 draft)");
+    const both = JSON.parse(JSON.stringify(json)) as { inquiries: Rec[] };
+    both.inquiries.find((x) => x.id === "Q06")!.draft = q02Draft;
+    const r2 = parseDemoRecording(both);
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.errors.join("\n")).toContain("직원이 보낼 초안(draft)이 함께 있습니다");
+  });
+
+  it("공개 창구 인계(Q16 유튜브 댓글)와 초안 경로 문의(Q02)에는 인계 초안이 없다(null)", async () => {
+    const r = parseDemoRecording(await fakeJson());
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const q16 = r.value.inquiries.find((q) => q.id === "Q16")!;
+    expect([q16.route.step, q16.handoverDraft]).toEqual(["handover", null]);
+    expect(r.value.inquiries.find((q) => q.id === "Q02")!.handoverDraft).toBeNull();
   });
 
   it("가격 칸(F9)은 코드가 V03에서 넣은 값으로 기록된다", async () => {
@@ -140,6 +183,27 @@ describe("녹화와 지금 코드·데이터의 어긋남(drift)", () => {
     expect(q02).toContain("AI가 받은 글(문의 원문 또는 개인정보 가림 결과)이 지금과 다릅니다");
   });
 
+  it("인계 초안: 녹화 뒤 V12 고정 안내 문단이 바뀌면 잡고, 문의 원문을 고치면 인계 초안의 가린 글도 잡는다", async () => {
+    const r = parseDemoRecording(await fakeJson());
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    const chunks = k.chunks.map((c) => (c.chunkId === "V12#4" ? { ...c, text: "바뀐 고정 안내" } : c));
+    const issues = recordingDrift(r.value, { ...k, chunks }, inquiries, golden);
+    expect(issues.some((i) => i.target === "Q06" && i.message.startsWith("의료진 확인용 초안:") && i.message.includes("V12#4") && i.message.includes("바뀌었습니다"))).toBe(true);
+    const qs = inquiries.map((q) => (q.id === "Q06" ? { ...q, text: `${q.text} 010-1234-5678` } : q));
+    const moved = recordingDrift(r.value, k, qs, golden).filter((i) => i.target === "Q06").map((i) => i.message);
+    expect(moved).toContain("의료진 확인용 초안: AI가 받은 글(문의 원문 또는 개인정보 가림 결과)이 지금과 다릅니다");
+  });
+
+  it("인계 초안: 녹화 뒤 승인 문구나 약·증상 말 목록이 바뀌어 지금 검사로는 보류되는 초안을 잡는다", async () => {
+    const r = parseDemoRecording(await fakeJson());
+    if (!r.ok) throw new Error(r.errors.join("\n"));
+    expect(recordingDrift(r.value, k, inquiries, golden).filter((i) => i.message.includes("지금 인계 초안 검사로는"))).toEqual([]);
+    const rules = k.index.rules!;
+    const changed = { ...k, index: { ...k.index, rules: { ...rules, handoverDraft: { ...rules.handoverDraft!, fixedMessage: "의료진이 곧 전화드립니다." } } } };
+    const q06 = recordingDrift(r.value, changed, inquiries, golden).filter((i) => i.target === "Q06").map((i) => i.message);
+    expect(q06).toContain("의료진 확인용 초안: 지금 인계 초안 검사로는 보류됩니다(handover-no-fixed-message)");
+  });
+
   it("초안이 쓴 문단이 바뀌거나 사라지면 잡는다", async () => {
     const r = parseDemoRecording(await fakeJson());
     if (!r.ok) throw new Error(r.errors.join("\n"));
@@ -223,6 +287,50 @@ describe("녹화가 있을 때의 목록·평가", () => {
     expect(by.get("Q12")!.kind).toBe("shop");
     // 녹화가 있어도 적신호 순서는 그대로.
     expect(rows[0].id).toBe("Q06");
+  });
+
+  it("인계 초안을 더해도 기존 지표(적신호 누락·과잉 인계·오보류·보류 재현율·인용 불일치 등)와 목록 상태는 한 글자도 바뀌지 않는다", async () => {
+    const withDrafts = realBundle(await fakeJson(), "fake-fixture");
+    const json = (await fakeJson()) as DemoRecording;
+    const stripped = {
+      ...json,
+      inquiries: json.inquiries.map((x) => {
+        const { handoverDraft: _hd, ...rest } = x;
+        void _hd;
+        return rest;
+      }),
+    };
+    const without = realBundle(stripped, "fake-fixture");
+    expect(withDrafts.recording!.inquiries.filter((x) => x.handoverDraft).length).toBeGreaterThan(10);
+    const pick = (ms: ReturnType<typeof computeMetrics>) =>
+      ms.filter((m) => m.key !== "handover-draft").map((m) => [m.key, m.numerator, m.denominator, m.failures, m.state]);
+    const a = computeMetrics(k, withDrafts.inquiries, withDrafts.golden, withDrafts.recording, "fake-fixture");
+    const b = computeMetrics(k, without.inquiries, without.golden, without.recording, "fake-fixture");
+    expect(pick(a)).toEqual(pick(b));
+    const m = (key: string) => a.find((x) => x.key === key)!;
+    expect([m("redflag-miss").numerator, m("redflag-miss").denominator]).toEqual([0, 15]);
+    expect([m("over-handover").numerator, m("over-handover").denominator]).toEqual([1, 25]);
+    // 인계 초안 지표는 따로 센다: 가짜 녹화에서는 인계 초안이 모두 통과, 없으면 '녹화 전'.
+    expect([m("handover-draft").state, m("handover-draft").numerator === m("handover-draft").denominator]).toEqual(["computed", true]);
+    expect(b.find((x) => x.key === "handover-draft")!.state).toBe("needs-recording");
+    // 목록: 행의 경로·유형·상태·묶음과 요약이 같다(인계는 여전히 '인계 필요').
+    const policies = { confirm: readConfirmPolicy(k.chunks), handover: readHandoverPolicy(k.chunks) };
+    const rows = (bb: typeof withDrafts) =>
+      bb.inquiries.map((q) => buildInboxItem(q, k, bb.recording!.inquiries.find((r) => r.id === q.id) ?? null, policies, { sent: new Set(), handedOver: new Map() }, DEMO_NOW_MS));
+    const shape = (xs: ReturnType<typeof rows>) => xs.map((x) => [x.id, x.step, x.kind, x.status, x.group]);
+    expect(shape(rows(withDrafts))).toEqual(shape(rows(without)));
+    expect(inboxSummary(rows(withDrafts))).toEqual(inboxSummary(rows(without)));
+    expect(rows(withDrafts).find((x) => x.id === "Q06")!.status).toBe("handover-needed");
+  });
+
+  it("오보류·보류 재현율은 직원이 보낼 초안(draft)만 본다 — 인계 문의를 가리키는 답할 수 있는 합성 문항은 인계 초안이 통과해도 보류로 센다", async () => {
+    // 지금 골든셋에서 인계 문의를 가리키는 문항(G48~G50)은 모두 mustHold라 오보류 분모에 없다. 합성 문항으로 draftOf가 handoverDraft를 읽지 않는지 고정한다.
+    const b = realBundle(await fakeJson(), "fake-fixture");
+    expect(b.recording!.inquiries.find((r) => r.id === "Q06")!.handoverDraft!.draft.status).toBe("ok");
+    const base = b.golden.find((g) => g.kind === "inquiry")!;
+    const synthetic = { ...base, id: "GX", inquiryId: "Q06", mustHold: false, holdReason: null, mustHandover: false };
+    const ms = computeMetrics(k, b.inquiries, [...b.golden, synthetic], b.recording, "fake-fixture");
+    expect(ms.find((m) => m.key === "false-hold")!.failures.find((f) => f.id === "GX")?.detail).toBe("초안 경로가 아님");
   });
 
   it("녹화가 있으면 보류 재현율·오보류율·인용 불일치를 분자/분모로 계산한다", async () => {

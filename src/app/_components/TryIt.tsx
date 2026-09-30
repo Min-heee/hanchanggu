@@ -3,12 +3,14 @@
 /**
  * 직접 해 보기(PRD 3절 12~20초). 입력한 문장을 개인정보 가림 → 안전 규칙 → 문서 찾기까지 브라우저에서 바로 돌린다.
  * AI 초안(③)은 준비된 질문에만 있다 — 입력한 문장으로 AI를 부르지 않는다(방문자 비용 0, PRD F18).
+ * 인계 카드도 같다: 준비된 인계 문의에는 의료진 확인용 AI 초안(PRD v0.3)이 붙지만, 직접 넣은 문장에는 카드만 뜬다.
  * 첫 화면을 차지하지 않게 한 줄 입력과 예시만 두고, 결과는 누른 뒤에 펼친다.
  */
 
 import { useState } from "react";
 import { analyzeInquiry, type Analysis } from "@/demo/analyze";
 import { DEMO_NOW_MS } from "@/demo/clock";
+import { handoverDraftAllowed } from "@/core/route";
 import { handoverInfo } from "@/demo/inbox";
 import { handoverCardModel, liveExcerpts, maskedCaseForTry, maskedView, retrievalView } from "@/demo/view";
 import { engine } from "../_lib/data";
@@ -81,12 +83,16 @@ export function TryIt() {
 
       {result && (
         <div style={{ marginTop: 12 }} aria-live="polite">
-          <MaskedText view={maskedView(maskedCaseForTry(result.a.decision.step, result.a.decision.mask))} />
+          <MaskedText view={maskedView(maskedCaseForTry(result.a.decision.step, result.a.decision.mask, handoverDraftAllowed(result.a.decision)))} />
           {result.a.decision.step === "handover" ? (
             <HandoverCard
               model={handoverCardModel(result.a.decision, handoverInfo(DEMO_NOW_MS, null, policies.handover, k, DEMO_NOW_MS), policies.handover, DEMO_NOW_MS, k.titles)}
               postop={result.a.postopRead}
-            />
+            >
+              <p className="small muted" style={{ marginTop: 8 }}>
+                직접 넣은 문장으로는 AI를 부르지 않습니다 — 준비된 인계 문의에는 의료진 확인용 초안이 붙습니다.
+              </p>
+            </HandoverCard>
           ) : result.a.decision.step === "public-template" ? (
             <div className="card">
               <h3>공개 창구 — 고정 문구만</h3>

@@ -2,6 +2,8 @@
  * 사내 Q&A의 규칙 카드. 그릴 값은 src/demo/qa.ts staffRuleCard가 만든다(시험으로 고정).
  * 문의함 인계 카드(HandoverCard)와 모양·말을 맞추되, 읽는 사람이 직원이라 "이 질문을 받은 직원이 할 일"로 쓴다.
  * 인계 절차는 문서 원문을 그대로 인용한다 — 코드가 절차를 요약해 쓰면 문서가 바뀌어도 카드만 옛 절차로 남는다.
+ * 2026-09-30(PRD v0.3)부터 문의함의 인계 건에는 의료진 확인용 AI 초안이 붙지만, 직원이 할 일은 그대로다(인계하고 승인 문구만 보냄).
+ * 그래서 이 카드의 동작과 머리말("직원은 증상·약에 답하지 않습니다")은 바꾸지 않고, 그 사실만 한 줄 덧붙인다.
  *
  * 훅을 쓰지 않는 순수 컴포넌트로 둔다: 시험(renderToStaticMarkup)에서 V12 문단이 그대로 찍히는지 본다.
  */
@@ -71,6 +73,7 @@ export function StaffRuleCard({ model }: { model: StaffRuleCardModel }) {
         <>
           <p className="quote">{model.patientMessage.text}</p>
           <p className="small muted">출처: {model.patientMessage.source} · 고쳐 쓰지 않습니다</p>
+          <p className="small muted">문의함의 인계 건에는 AI가 병원 문서만 인용한 의료진 확인용 초안이 붙지만, 직원은 그 초안을 보내지 않습니다.</p>
         </>
       ) : (
         <p>인계 절차 문서에서 승인 문구를 읽지 못했습니다. 문구를 지어내지 않습니다 — 문서를 확인하세요.</p>

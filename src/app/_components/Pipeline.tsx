@@ -179,7 +179,7 @@ function FilledParts({ parts, onFill }: { parts: OutgoingPart[]; onFill: (f: Fil
   );
 }
 
-const SENTENCE_KIND = { cited: "근거 있음", allowlisted: "인사·맺음", template: "가격·시간 칸", uncited: "근거 없음" } as const;
+const SENTENCE_KIND = { cited: "근거 있음", allowlisted: "인사·맺음", template: "가격·시간 칸", uncited: "근거 없음", recap: "되짚기(문의 내용만)" } as const;
 
 export function DraftPanel({
   draft,
@@ -269,11 +269,14 @@ export function VerifyPanel({
   display,
   fillSources,
   highlight,
+  okLabel = "확인 통과 — 직원 검토 뒤 보낼 수 있음",
 }: {
   draft: DraftResult | null;
   display: DraftDisplay | null;
   fillSources: FillSource[];
   highlight: ReadonlySet<string>;
+  /** 통과 배지 글. 인계 초안(의료진 확인용)은 직원이 보낼 수 없어 따로 준다. */
+  okLabel?: string;
 }) {
   return (
     <section className="card" aria-label="④ 근거·확인">
@@ -284,7 +287,7 @@ export function VerifyPanel({
         <div className="stack">
           <p>
             {draft.status === "ok" ? (
-              <span className="badge green">확인 통과 — 직원 검토 뒤 보낼 수 있음</span>
+              <span className="badge green">{okLabel}</span>
             ) : (
               <span className="badge gray">보류 — 초안을 보내지 않음</span>
             )}

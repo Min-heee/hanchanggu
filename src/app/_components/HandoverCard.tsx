@@ -1,7 +1,9 @@
 /**
  * 인계 카드(PRD F5·F6). 그릴 값은 src/demo/view.ts handoverCardModel이 만든다(시험으로 고정).
  * 이 컴포넌트는 값을 그리기만 한다 — 환자에게 보낼 문구를 여기서 고르거나, 시각을 여기서 재지 않는다.
- * 증상을 해석하는 말은 한 줄도 쓰지 않는다 — 한창구는 증상을 판단하지 않는다(PRD 3절 사용자 B).
+ * 카드가 쓰는 글에는 증상을 해석하는 말이 한 줄도 없다 — 한창구는 증상을 판단하지 않는다(PRD 3절 사용자 B).
+ * 의료진 확인용 AI 초안(PRD v0.3)은 children으로 카드 안에 붙는다(src/app/_components/HandoverDraft.tsx). 그 초안도 맨 앞 되짚기 한 문장(코드가 검사)
+ * 밖에는 병원 문서 인용만이고, 직원은 보낼 수 없다. 직원이 보내는 것은 아래 V12 승인 문구뿐이다.
  *
  * 훅을 쓰지 않는 순수 컴포넌트로 둔다: 시험(renderToStaticMarkup)에서 V12 문구가 그대로 찍히는지 본다.
  */
@@ -31,7 +33,7 @@ export function HandoverCard({
         <span className={`badge ${model.urgent ? "red" : "orange"}`}>{model.urgencyLabel}</span>
       </div>
       <p className="small muted">
-        {model.byClassifier ? "AI 분류가 인계로 정했습니다." : "안전 규칙이 AI보다 먼저 잡았습니다."} 이 문의에는 AI 답장 초안을 만들지 않습니다.
+        {model.byClassifier ? "AI 분류가 인계로 정했습니다." : "안전 규칙이 AI보다 먼저 잡았습니다."} {model.draftNote}
       </p>
 
       <dl className="kv">
@@ -112,7 +114,7 @@ export function HandoverCard({
         </div>
       )}
 
-      <h3 style={{ marginTop: 12 }}>환자에게 보낼 문구 (병원이 승인한 문구 그대로)</h3>
+      <h3 style={{ marginTop: 12 }}>직원이 환자에게 보낼 문구 (병원이 승인한 문구 그대로)</h3>
       {model.patientMessage ? (
         <>
           <p className="quote">{model.patientMessage.text}</p>

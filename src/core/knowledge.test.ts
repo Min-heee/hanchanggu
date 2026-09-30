@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildKnowledge, groupHitsByDoc } from "./knowledge";
+import { buildKnowledge, fixedMessageQuoteIndices, groupHitsByDoc, unquoteFixedMessage } from "./knowledge";
 import { search } from "./search";
 import { loadVault } from "./vault";
 import { fixtureFiles } from "./__fixtures__/load";
@@ -58,5 +58,23 @@ describe("groupHitsByDoc", () => {
       expect(idx).toEqual([...idx].sort((a, b) => a - b));
     }
     expect(grouped.find((g) => g.docId === "V04")?.title).toBe("예약·변경·취소 규정");
+  });
+});
+
+describe("승인 문구를 감싼 따옴표 빼기(인계 초안, 1차 녹화 20건 중 14건이 감쌈)", () => {
+  const MSG = "보내 주신 내용은 의료진에게 바로 전달했습니다. 의료진이 확인한 뒤 직접 연락드리겠습니다. 급하면 119를 이용해 주세요.";
+
+  it("승인 문구 바로 앞뒤의 따옴표만 뺀다(큰따옴표·둥근 따옴표, 공백·끝 문장부호 허용)", () => {
+    expect(unquoteFixedMessage(`"${MSG}"`, MSG)).toBe(MSG);
+    expect(unquoteFixedMessage(`수술 3일째라고 말씀 주셨습니다. “${MSG}” 진료시간은 {{hours}}입니다.`, MSG)).toBe(`수술 3일째라고 말씀 주셨습니다. ${MSG} 진료시간은 {{hours}}입니다.`);
+    // 공백 차이가 있어도 승인 문구로 찾는다. 끝 마침표 뒤 따옴표도.
+    expect(unquoteFixedMessage(`" ${MSG.replace(/ /g, "  ")} "`, MSG)).toBe(` ${MSG.replace(/ /g, "  ")} `);
+  });
+
+  it("승인 문구 밖의 따옴표와 승인 문구가 없는 글은 그대로", () => {
+    expect(unquoteFixedMessage(`'두피 관리'는 1회 {{price:scalp-care}}입니다. ${MSG}`, MSG)).toBe(`'두피 관리'는 1회 {{price:scalp-care}}입니다. ${MSG}`);
+    expect(unquoteFixedMessage(`"${MSG.slice(0, 20)}"`, MSG)).toBe(`"${MSG.slice(0, 20)}"`);
+    expect(unquoteFixedMessage(`"${MSG}"`, null)).toBe(`"${MSG}"`);
+    expect(fixedMessageQuoteIndices(MSG, MSG)).toEqual([]);
   });
 });

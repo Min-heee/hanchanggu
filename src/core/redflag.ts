@@ -259,7 +259,7 @@ export function checkRedflags(text: string, config: RedflagConfig): RedflagResul
 
 /**
  * 환자가 스스로 적은 수술 후 일수("D+9", "9일째", "수술한 지 9일")를 읽는다.
- * 인계 카드에 보이기 위한 것이고 판정에는 쓰지 않는다. 한창구는 이 값을 해석하지 않는다(PRD 3절 B).
+ * 인계 카드에 보이기 위한 것이고 판정에는 쓰지 않는다. 한창구는 이 값을 해석하지 않는다(인계 카드에 보이기만 한다).
  */
 export function extractSelfReportedDays(text: string): { days: number; text: string }[] {
   const t = text.normalize("NFKC");

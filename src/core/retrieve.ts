@@ -21,8 +21,14 @@
  *    수술 후 안내(V07)여서 초안이 인계·연고 금지를 빼먹었다. 말 목록은 문의 게이트가 쓰는 것과 같은 볼트 값을 읽는다.
  * 4. 날짜 세는 기준 함께 보내기: 질문이 경과일을 말하고 D+N 소제목 문단(D+3~D+14 등)이 결과에 있으면, 같은 문서에서 "D+0"을 정한 문단을 함께 보낸다.
  *    기준 없이 "D+3부터"만 가면 "수술 3일째"가 D+2인지 D+3인지 직원이 알 수 없다(2회차 녹화 G16 검토).
+ *
+ * 인계 문의의 의료진 확인용 초안(PRD v0.3)은 `retrieveForHandover`로 따로 찾는다. BM25 순위는 같이 쓰되 위 규칙 2·4(경과일 앞세우기·날짜 세는
+ * 기준)는 끄고, 보낼 수 있는 문단(core/knowledge.ts handoverExcerptChunkIds — 고정 안내·즉시 조치·수술 후 즉시 조치 문단)만 남기고,
+ * 고정 안내 문단과 적신호 기준의 즉시 조치 문단을 맨 앞에 세운다. 그 뒤에, 문의의 물음 절에 의료가 아닌 물음(예약·가격 등)이 있으면 그용 문단
+ * (core/knowledge.ts handoverGeneralChunkIds)을 점수 순으로 최대 2칸 더한다(2026-09-30 오너 두 번째 결정).
  */
 
+import { inquiryClauses } from "./clauses";
 import type { MedicationConfig } from "./medication";
 import { checkMedication } from "./medication";
 import { headingPostopRange, rangeContains, readPostopDay } from "./postop";
@@ -61,11 +67,51 @@ export interface StaffPinRules {
   medicationDocId: string;
 }
 
+/**
+ * 인계 초안 발췌 규칙(PRD v0.3). core/knowledge.ts가 볼트에서 채운다.
+ * 보낼 문단 목록(chunkIds)을 코드가 미리 정한다 — 환자에게 갈 초안에 직원 절차·날짜별 일반 관리·약 복용 안내가 섞일 자리를
+ * 지시문(규칙 18·19)에만 맡기지 않고 발췌에서 없앤다.
+ */
+export interface HandoverDraftRules {
+  /** 인계 초안이 인용해도 되는 문서(승인된 최신판만). 인용 대조의 허용 목록이다. */
+  docIds: string[];
+  /** 모델에 보내도 되는 문단(core/knowledge.ts handoverExcerptChunkIds). 고정 안내·즉시 조치 문단 포함. */
+  chunkIds: string[];
+  /** 고정 안내 문단. 읽지 못하면 null — 인계 초안은 모델을 부르지 않고 보류한다(src/demo/record.ts). */
+  fixedChunkId: string | null;
+  /** 고정 안내 문단의 따옴표 안 승인 문구. 초안에 통째로 들어 있어야 통과한다(src/llm/handover-check.ts checkHandoverDraft). 읽지 못하면 null(보류). */
+  fixedMessage: string | null;
+  /** 고정 안내 다음에 세울 즉시 조치 문단(적신호 기준 '문맥 없이도 인계하는 증상' — 119·응급실 안내). 없으면 세우지 않는다. */
+  urgentChunkId: string | null;
+  /**
+   * 문의에 섞인 의료가 아닌 물음(진료시간·가격·예약·반품 등)의 답으로 보낼 수 있는 문단(core/knowledge.ts handoverGeneralChunkIds).
+   * 없거나 비면 더하지 않는다.
+   */
+  generalChunkIds?: string[];
+}
+
+/** 인계 초안 발췌에 더하는 의료가 아닌 물음용 문단의 최대 칸 수. */
+export const HANDOVER_GENERAL_MAX = 2;
+
+/**
+ * 의료가 아닌 물음의 말(가격·예약·진료시간·주차·오시는 길·쇼핑몰). 인계 문의의 **물음 절**(core/clauses.ts)에 이 말이 있을 때만 행정 안내 문단을 더한다
+ * (2026-09-30 적대 검증: BM25 점수만으로 고르니 38도 열 문의(Q14)에 쇼핑몰 안내, 두드러기(Q19)에 주사 가격, 출혈(Q08)에 예약 변경이 붙었다).
+ * "번호는 예약 기록과 같다고 함"처럼 물음이 아닌 절의 '예약'은 세지 않는다.
+ */
+export const HANDOVER_ADMIN_WORDS = /얼마|가격|비용|금액|요금|예약|변경|취소|환불|시간|몇\s*시|휴진|쉬는\s*날|주차|오시는|위치|주소|반품|교환|배송|주문|결제/u;
+
+/** 문의의 물음 절에 의료가 아닌 물음의 말이 있나(retrieveForHandover가 행정 안내 문단을 더할지). */
+export function asksAdminQuestion(text: string): boolean {
+  return inquiryClauses(text).some((c) => c.question && HANDOVER_ADMIN_WORDS.test(c.text));
+}
+
 export interface RetrievalRules {
   synonyms: QuerySynonym[];
   staffPins: StaffPinRules | null;
   /** 근거 강도만 재는 색인(소제목 끝의 찾는 말 괄호를 뺀 것, `stripSearchAlias`). 없으면 순위 색인으로 잰다. */
   strengthIndex?: SearchIndex;
+  /** 없으면 인계 초안 발췌가 비어 초안을 만들지 않는다. */
+  handoverDraft?: HandoverDraftRules | null;
 }
 
 /**
@@ -87,7 +133,10 @@ export interface RetrievalIndex extends SearchIndex {
   rules?: RetrievalRules;
 }
 
-/** 앞에 세운 까닭. redflag·handover·medication: 직원 질문 규칙(3), day-base: 날짜 세는 기준(4). */
+/**
+ * 앞에 세운 까닭. redflag·handover·medication: 직원 질문 규칙(3), day-base: 날짜 세는 기준(4).
+ * 인계 초안의 고정 안내 문단은 handover, 적신호 기준의 즉시 조치 문단은 redflag다(retrieveForHandover).
+ */
 export type PinReason = "redflag" | "handover" | "medication" | "day-base";
 
 export interface RetrievalHit extends SearchHit {
@@ -246,12 +295,12 @@ const D_PLUS_HEADING = /D\s*\+\s*\d/i;
  * 규칙 4: 날짜 구간 문단이 든 문서마다 D+0 기준 문단을 마지막 날짜 구간 문단 바로 뒤에 넣는다. 자리는 뒤에서부터
  * '규칙으로 넣지 않았고 날짜 구간도 아닌' 문단 하나를 빼서 만든다 — 발췌 개수(k)는 늘리지 않는다. 뺄 문단이 없으면 넣지 않는다.
  */
-function withDayBase(index: SearchIndex, hits: RetrievalHit[], hitOf: (c: Chunk) => SearchHit, k: number): RetrievalHit[] {
+function withDayBase(index: SearchIndex, hits: RetrievalHit[], hitOf: (c: Chunk) => SearchHit, k: number, allow: (c: Chunk) => boolean): RetrievalHit[] {
   let out = [...hits];
   const isDate = (h: RetrievalHit) => h.chunk.heading !== null && D_PLUS_HEADING.test(h.chunk.heading.normalize("NFKC"));
   const docs = [...new Set(out.filter(isDate).map((h) => h.chunk.docId))];
   for (const docId of docs) {
-    const base = index.docs.map((d) => d.chunk).find((c) => c.docId === docId && DAY_BASE.test(c.text));
+    const base = index.docs.map((d) => d.chunk).find((c) => c.docId === docId && DAY_BASE.test(c.text) && allow(c));
     if (!base || out.some((h) => h.chunk.chunkId === base.chunkId)) continue;
     if (out.length >= k) {
       let drop = -1;
@@ -278,6 +327,52 @@ function withDayBase(index: SearchIndex, hits: RetrievalHit[], hitOf: (c: Chunk)
  * @param postopDay 문의에서 읽었거나 직원이 고친 경과일. null이면 앞세우기를 하지 않는다.
  */
 export function retrieve(index: RetrievalIndex, mode: "reply" | "staff-qa", text: string, postopDay: number | null = null, k = TOP_K): Retrieval {
+  return rank(index, mode, text, postopDay, k, {});
+}
+
+/**
+ * 인계 문의의 의료진 확인용 초안(PRD v0.3)이 받을 발췌. `retrieve(…, "reply", …)`와 같은 질의·BM25 순위에서
+ * ① 보낼 수 있는 문단(HandoverDraftRules.chunkIds) 밖은 뺀다. ② 고정 안내 문단(의료진이 확인한 뒤 연락한다는 승인 문구, pin "handover")과
+ * 적신호 기준의 즉시 조치 문단(pin "redflag")을 점수와 상관없이 이 순서로 맨 앞에 세운다.
+ * 경과일 앞세우기와 날짜 세는 기준 문단은 쓰지 않는다(경과일을 받지 않는다) — 켜 두면 증상 문의 발췌가 V07 날짜별 일반 관리 문단으로 찬다
+ * (2026-09-30 검증: Q06 V12#4 V07#3 V07#9 V07#2 V07#0). 볼트 V11은 증상이 적힌 문의에 수술 후 일반 안내로 답하지 말라고 적는다.
+ * ③ 문의의 물음 절에 의료가 아닌 물음의 말(HANDOVER_ADMIN_WORDS)이 있으면, 그 답이 될 문단(HandoverDraftRules.generalChunkIds)을 같은 질의·같은
+ * BM25 점수로 골라, 점수가 근거 약함 기준(MIN_TOP_SCORE) 이상인 것만 최대 HANDOVER_GENERAL_MAX칸 고정 문단 바로 뒤에 둔다(2026-09-30 오너 두 번째 결정).
+ * 물음 말이 있어도 점수로 고르므로 묻지 않은 예약·가격 문단이 섞일 수 있다 — 묻지 않은 것은 쓰지 말라는 것은 지시문(규칙 18)이 맡고, 인용 문장이 원문
+ * 그대로인지·숫자·가격 칸은 검증기와 인계 초안 검사가, 문의와 상관있는 답인지는 의료진 확인이 맡는다.
+ * 근거 강도(topScore·weak)는 기록만 한다 — 답의 핵심인 고정 안내 문단이 늘 들어가므로 인계 초안에는 근거 약함 관문을 걸지 않는다.
+ * 규칙이 없으면(시험용 작은 색인) 발췌가 비고, 초안을 만들지 않는다.
+ */
+export function retrieveForHandover(index: RetrievalIndex, text: string, k = TOP_K): Retrieval {
+  const rules = index.rules?.handoverDraft ?? null;
+  const allowed = new Set(rules?.chunkIds ?? []);
+  const allow = (c: Chunk) => allowed.has(c.chunkId);
+  const chunkOf = (id: string | null | undefined) => (id ? (index.docs.find((d) => d.chunk.chunkId === id)?.chunk ?? null) : null);
+  const pins: { chunk: Chunk; pin: PinReason }[] = [];
+  const fixed = chunkOf(rules?.fixedChunkId);
+  const urgent = chunkOf(rules?.urgentChunkId);
+  if (fixed && allow(fixed)) pins.push({ chunk: fixed, pin: "handover" });
+  if (urgent && allow(urgent)) pins.push({ chunk: urgent, pin: "redflag" });
+  const base = rank(index, "reply", text, null, k, { allow, pins });
+  const generalIds = new Set(rules?.generalChunkIds ?? []);
+  // 고정 문단이 없으면(고정 안내를 읽지 못함) 초안을 만들지 않으므로 의료가 아닌 물음용 문단도 더하지 않는다.
+  // 문의의 물음 절에 의료가 아닌 물음의 말이 없으면 더하지 않는다 — 묻지 않은 행정 안내가 증상 문의 초안에 끼지 않게.
+  if (generalIds.size === 0 || !base.hits.some((h) => h.pin === "handover") || !asksAdminQuestion(text)) return base;
+  const general = rank(index, "reply", text, null, HANDOVER_GENERAL_MAX, { allow: (c) => generalIds.has(c.chunkId) }).hits.filter((h) => h.score >= MIN_TOP_SCORE);
+  const pinned = base.hits.filter((h) => h.pin !== null);
+  const rest = base.hits.filter((h) => h.pin === null);
+  return { ...base, hits: [...pinned, ...general, ...rest].slice(0, k).map((h, i) => ({ ...h, rank: i + 1 })) };
+}
+
+interface RankOptions {
+  /** 결과에 넣어도 되는 문단. 없으면 모두. */
+  allow?: (c: Chunk) => boolean;
+  /** 점수와 상관없이 맨 앞(경과일 구간 문단보다도 앞)에 세울 문단. */
+  pins?: { chunk: Chunk; pin: PinReason }[];
+}
+
+function rank(index: RetrievalIndex, mode: "reply" | "staff-qa", text: string, postopDay: number | null, k: number, opts: RankOptions): Retrieval {
+  const allow = opts.allow ?? (() => true);
   const baseQuery = mode === "reply" ? queryFromInquiry(text) : text;
   const { query, expandedWith } = expandQuery(baseQuery, index.rules?.synonyms ?? []);
   const day = mode === "reply" ? postopDay : null;
@@ -287,27 +382,33 @@ export function retrieve(index: RetrievalIndex, mode: "reply" | "staff-qa", text
   const hitOf = (chunk: Chunk): SearchHit => scoreOf.get(chunk.chunkId) ?? { rank: 0, chunk, score: 0, matchedTerms: [] };
 
   const front: RetrievalHit[] = [];
+  for (const p of opts.pins ?? []) {
+    if (!front.some((h) => h.chunk.chunkId === p.chunk.chunkId)) front.push({ ...hitOf(p.chunk), postopBoost: false, pin: p.pin });
+  }
   if (day !== null) {
     const boosted: SearchHit[] = [];
     index.docs.forEach(({ chunk }) => {
       const range = headingPostopRange(chunk.heading);
-      if (range && rangeContains(range, day)) boosted.push(hitOf(chunk));
+      if (range && rangeContains(range, day) && allow(chunk) && !front.some((h) => h.chunk.chunkId === chunk.chunkId)) boosted.push(hitOf(chunk));
     });
     boosted.sort((a, b) => b.score - a.score);
     front.push(...boosted.map((h) => ({ ...h, postopBoost: true, pin: null })));
   }
-  // 직원 질문에만: 문의는 적신호·약 말이 있으면 규칙 게이트가 인계해 검색까지 오지 않는다.
+  // 직원 질문에만: 문의는 적신호·약 말이 있으면 규칙 게이트가 먼저 인계로 정한다(인계 초안은 retrieveForHandover가 인계 발췌로 따로 찾는다).
   if (mode === "staff-qa" && index.rules?.staffPins) {
     for (const p of staffPins(index, index.rules.staffPins, text)) {
       if (!front.some((h) => h.chunk.chunkId === p.chunk.chunkId)) front.push({ ...hitOf(p.chunk), postopBoost: false, pin: p.pin });
     }
   }
   const frontIds = new Set(front.map((h) => h.chunk.chunkId));
-  const ordered = [...front, ...full.hits.filter((h) => !frontIds.has(h.chunk.chunkId)).map((h) => ({ ...h, postopBoost: false, pin: null }))].slice(0, k);
+  const ordered = [
+    ...front,
+    ...full.hits.filter((h) => !frontIds.has(h.chunk.chunkId) && allow(h.chunk)).map((h) => ({ ...h, postopBoost: false, pin: null })),
+  ].slice(0, k);
   // 날짜 세는 기준은 질문이 경과일을 말할 때만 보낸다. 예약 문의에 'D+1 내원' 문단이 점수로 섞여 들어온 경우까지 넣으면
   // 발췌 한 칸을 곁가지 두 개가 차지한다(Q33으로 확인). 직원 질문은 앞세우기에 쓰지 않는 경과일을 여기서만 읽는다.
   const asksDay = mode === "reply" ? day !== null : readPostopDay(text) !== null;
-  const hits = asksDay ? withDayBase(index, ordered, hitOf, k) : ordered;
+  const hits = asksDay ? withDayBase(index, ordered, hitOf, k, allow) : ordered;
   // 근거 강도는 앞세운 문단(점수 0일 수 있음)도, 넓히기로 더한 말도, 소제목의 찾는 말도 빼고 문의 원래 말과 겹친 정도로만 잰다.
   return {
     mode,

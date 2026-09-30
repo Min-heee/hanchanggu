@@ -13,6 +13,7 @@ import {
   deadlineBadge,
   filterInbox,
   filterOptions,
+  HANDOVER_DRAFT_SENT_LABEL,
   inboxRows,
   inboxSummary,
   KIND_LABEL,
@@ -82,7 +83,7 @@ export function Inbox() {
       </div>
       <p className="small muted">
         적신호 건수는 안전 규칙이 잡은 수라 과잉 인계가 섞일 수 있습니다(정답과 비교는 <Link href="/eval">평가</Link> 탭).
-        <span className="wide-only"> 순서: 적신호 → 약·분류 인계 → 예약금 확정 대기 → 오래 기다린 순, 발송한 건은 맨 아래.</span>
+        <span className="wide-only"> 순서: 적신호 → 약·분류 인계 → 예약금 확정 대기 → 오래 기다린 순, 발송한 건은 맨 아래(인계 건은 초안을 보내도 인계 묶음에 남음).</span>
       </p>
       <details className="filters-fold">
         <summary>
@@ -171,6 +172,7 @@ function Row({ it }: { it: InboxItem }) {
         <ChannelBadge channel={it.inquiry.channel} />
         <KindBadge kind={it.kind} />
         <StatusBadge status={it.status} />
+        {it.handoverDraftSent && <span className="badge gray">{HANDOVER_DRAFT_SENT_LABEL}</span>}
         <Deadline item={it} />
         {maskedCount > 0 && <span className="badge gray">개인정보 가림 {maskedCount}곳</span>}
         {drift && <span className="badge orange">AI 답 이후 바뀜</span>}

@@ -6,17 +6,20 @@
  * ③은 '근거 없음'). 번들을 만들 때 문의·질문마다 녹화 때의 입력(가린 글, 경과일, 규칙 경로)과 검색 순위를
  * 지금 값과 대조하고, 어긋난 건을 화면에 '미리 만든 AI 답 뒤에 바뀜'으로 표시한다. 빌드를 멈추지는 않는다 —
  * 녹화는 키가 있을 때만 새로 만들 수 있어서, 멈추면 볼트 오타 하나 고치는 데도 키가 필요해진다.
+ * 인계 문의의 의료진 확인용 초안(handoverDraft, PRD v0.3)도 같은 식으로 가린 글·인계 발췌·초안이 쓴 문단을 대조하고,
+ * 통과한 초안은 지금 볼트 값(승인 문구·약·증상 말)과 녹화 때 가린 글(되짚기 대조)로 인계 초안 검사(checkHandoverDraft)를 다시 돌린다.
  */
 
 import type { Knowledge } from "../core/knowledge";
 import { checkPriceCitations } from "../core/pricecheck";
 import { maskPii } from "../core/mask";
 import { readPostopDay } from "../core/postop";
-import { retrieve } from "../core/retrieve";
-import { decideRoute } from "../core/route";
+import { retrieve, retrieveForHandover } from "../core/retrieve";
+import { decideRoute, handoverDraftAllowed } from "../core/route";
 import type { DraftResult } from "../llm/draft";
 import type { DemoRecording } from "./recording";
 import { recompose, type DraftMode } from "./refill";
+import { recheckHandoverDraft } from "./view";
 
 export interface DriftIssue {
   /** 문의 ID(Q01) 또는 골든셋 질문 ID(G16). */
@@ -38,8 +41,9 @@ export function recordingDrift(
   const add = (target: string, message: string) => issues.push({ target, message });
   const chunkText = new Map(k.chunks.map((c) => [c.chunkId, c.text]));
 
-  const checkDraft = (target: string, draft: DraftResult | null, mode: DraftMode) => {
+  const checkDraft = (target: string, draft: DraftResult | null, mode: DraftMode, tag = "", allowed: ReadonlySet<string> = k.allowedDocIds) => {
     if (!draft) return;
+    const add = (t: string, message: string) => issues.push({ target: t, message: `${tag}${message}` });
     // 화면은 통과한 초안의 보낼 글을 지금 가격표·진료시간·문서 제목으로 다시 채운다(refill.ts). 채운 글이 녹화 때와 다른 것은
     // 바뀜이 아니지만(모델 입력은 같다), 채우지 못하면 보낼 글이 없어지므로 알린다.
     if (draft.status === "ok") {
@@ -59,7 +63,7 @@ export function recordingDrift(
       }
     }
     for (const d of draft.documents) {
-      if (!k.allowedDocIds.has(d.docId)) add(target, `초안이 쓴 문서 ${d.docId}는 지금 검색 대상(승인된 최신판)이 아닙니다`);
+      if (!allowed.has(d.docId)) add(target, `초안이 쓴 문서 ${d.docId}는 지금 검색 대상(승인된 최신판)이 아닙니다`);
       for (const b of d.blocks) {
         const now = chunkText.get(b.chunkId);
         if (now === undefined) add(target, `초안이 쓴 문단 ${b.chunkId}가 지금 문서에 없습니다`);
@@ -87,6 +91,22 @@ export function recordingDrift(
       if (!sameOrder(live, r.retrieval.map((h) => h.chunkId))) add(r.id, "문서 찾기(①) 결과가 그때와 다릅니다");
     }
     checkDraft(r.id, r.draft, "reply");
+    if (r.handoverDraft) {
+      const hd = r.handoverDraft;
+      const tag = "의료진 확인용 초안: ";
+      const step = now.step === "classify" && r.classification !== null ? r.route.step : now.step;
+      if (!handoverDraftAllowed({ ...now, step }).ok) add(r.id, `${tag}지금은 인계 초안을 만들지 않는 경로·창구입니다`);
+      if (masked !== hd.maskedText) add(r.id, `${tag}AI가 받은 글(문의 원문 또는 개인정보 가림 결과)이 지금과 다릅니다`);
+      const liveHandover = retrieveForHandover(k.index, masked).hits.map((h) => h.chunk.chunkId);
+      if (!sameOrder(liveHandover, hd.retrieval.map((h) => h.chunkId))) add(r.id, `${tag}인계 발췌가 그때와 다릅니다`);
+      checkDraft(r.id, hd.draft, "reply", tag, k.handoverAllowedDocIds);
+      // 녹화 뒤 승인 문구·약·증상 말 목록이나 검사 규칙이 바뀌면, 그때 통과한 초안이 지금 검사로는 보류일 수 있다. 화면도 같은 함수로 다시 검사해
+      // 발송 패널을 숨긴다(view.ts recheckHandoverDraft) — 여기서는 번들 생성 때 알리기만 한다.
+      if (hd.draft.status === "ok") {
+        const again = recheckHandoverDraft(k, hd);
+        if (again.status !== "ok") add(r.id, `${tag}지금 인계 초안 검사로는 보류됩니다(${again.holdReasons.map((h) => h.code).join(", ")})`);
+      }
+    }
   }
 
   for (const g of rec.golden) {

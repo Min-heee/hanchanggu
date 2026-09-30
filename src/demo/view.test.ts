@@ -9,6 +9,7 @@ import { buildKnowledge } from "../core/knowledge";
 import { checkMedication } from "../core/medication";
 import { maskPii } from "../core/mask";
 import { retrieve } from "../core/retrieve";
+import { decideRoute, handoverDraftAllowed } from "../core/route";
 import { loadVault } from "../core/vault";
 import { analyzeInquiry, analyzeStaffQuestion } from "./analyze";
 import { DEMO_AS_OF, DEMO_NOW_MS } from "./clock";
@@ -21,7 +22,10 @@ import {
   bandText,
   depositBasis,
   draftSourceLabel,
+  HANDOVER_DRAFT_NOTE,
   handoverCardModel,
+  handoverDraftNotice,
+  handoverDraftView,
   highlightSegments,
   maskedCaseForInquiry,
   maskedCaseForQuestion,
@@ -78,32 +82,52 @@ describe("머리 띠", () => {
 });
 
 describe("개인정보 가림 펼치기 — AI를 부르지 않은 곳에서 'AI가 받은 글'이라 하지 않는다", () => {
-  it("규칙이 인계한 적신호 문의(Q11): AI에 보내지 않음", () => {
+  const allowedOf = (id: string) => handoverDraftAllowed(analyzeInquiry(k, q(id).channel, q(id).text).decision);
+
+  it("규칙이 인계한 적신호 문의(Q11): 인계 초안(PRD v0.3)을 위해 AI에 보내는 경로 — 녹화 전이면 '보낸다면'", () => {
     const a = analyzeInquiry(k, q("Q11").channel, q("Q11").text);
-    const v = maskedView(maskedCaseForInquiry("handover", null, a.decision.mask));
-    expect(v.summary).toBe("AI에 보내지 않음 — 안전 규칙이 먼저 잡음 (가린 곳 없음)");
+    const v = maskedView(maskedCaseForInquiry("handover", null, a.decision.mask, allowedOf("Q11")));
+    expect(v.summary).toBe("AI에 보낸다면 받을 글 (가린 곳 없음)");
+    expect(v.summary).not.toContain("AI가 받은 글");
     expect(v.note).toContain("보낸다면");
+  });
+
+  it("공개 창구 인계(Q16 유튜브 댓글)는 인계 초안을 만들지 않아 AI에 보내지 않는다", () => {
+    const a = analyzeInquiry(k, q("Q16").channel, q("Q16").text);
+    expect(a.decision.step).toBe("handover");
+    expect(allowedOf("Q16")).toEqual({ ok: false, why: "public" });
+    expect(maskedView(maskedCaseForInquiry("handover", null, a.decision.mask, allowedOf("Q16"))).summary).toMatch(/^AI에 보내지 않음 — 공개 창구는 고정 문구만/);
+    expect(maskedCaseForTry("handover", a.decision.mask, allowedOf("Q16")).kind).toBe("not-sent");
   });
 
   it("공개 창구(Q04)와 AI 답 준비 전의 초안 경로(Q02), 직접 해 보기", () => {
     const m = maskPii(q("Q04").text);
-    expect(maskedView(maskedCaseForInquiry("public-template", null, m)).summary).toMatch(/^AI에 보내지 않음 — 공개 창구는 고정 문구만/);
-    expect(maskedView(maskedCaseForInquiry("classify", null, maskPii(q("Q02").text))).summary).toMatch(/^AI에 보낸다면 받을 글/);
-    expect(maskedCaseForTry("handover", m).kind).toBe("not-sent");
-    expect(maskedCaseForTry("classify", m).kind).toBe("would-send");
+    const notHandover = { ok: false, why: "not-handover" } as const;
+    expect(maskedView(maskedCaseForInquiry("public-template", null, m, notHandover)).summary).toMatch(/^AI에 보내지 않음 — 공개 창구는 고정 문구만/);
+    expect(maskedView(maskedCaseForInquiry("classify", null, maskPii(q("Q02").text), notHandover)).summary).toMatch(/^AI에 보낸다면 받을 글/);
+    // 직접 해 보기의 인계 문장도 이 화면에서는 AI를 부르지 않지만, 준비된 인계 문의라면 인계 초안을 위해 보낼 글이다.
+    expect(maskedCaseForTry("handover", m, { ok: true }).kind).toBe("would-send");
+    expect(maskedCaseForTry("classify", m, notHandover).kind).toBe("would-send");
+    expect(maskedCaseForTry("public-template", m, notHandover).kind).toBe("not-sent");
   });
 
   it("AI 답이 있으면 그때 보낸 글을 보이고, 지금 가림 결과와 다르면 경고한다", async () => {
     const rec = await fakeRecording();
     const r17 = rec.inquiries.find((r) => r.id === "Q17")!;
     const live = maskPii(q("Q17").text);
-    const same = maskedView(maskedCaseForInquiry(r17.route.step, r17, live));
+    const notHandover = { ok: false, why: "not-handover" } as const;
+    const same = maskedView(maskedCaseForInquiry(r17.route.step, r17, live, notHandover));
     expect([same.summary.startsWith("AI가 받은 글 보기"), same.text, same.warn]).toEqual([true, r17.route.maskedText, null]);
-    const changed = maskedView(maskedCaseForInquiry(r17.route.step, { ...r17, route: { ...r17.route, maskedText: "옛 가림 결과" } }, live));
+    const changed = maskedView(maskedCaseForInquiry(r17.route.step, { ...r17, route: { ...r17.route, maskedText: "옛 가림 결과" } }, live, notHandover));
     expect([changed.text, changed.compareText, changed.warn !== null]).toEqual(["옛 가림 결과", live.masked, true]);
-    // 규칙이 인계한 문의는 녹화가 있어도 AI에 보낸 적이 없다.
+    // 규칙이 인계한 문의(Q06)는 분류 없이 인계 초안 때만 AI에 보냈다 — 그때 보낸 가린 글을 보인다.
     const r06 = rec.inquiries.find((r) => r.id === "Q06")!;
-    expect(maskedCaseForInquiry("handover", r06, maskPii(q("Q06").text)).kind).toBe("not-sent");
+    const c06 = maskedCaseForInquiry("handover", r06, maskPii(q("Q06").text), { ok: true });
+    expect(c06).toMatchObject({ kind: "recorded", recordedText: r06.handoverDraft!.maskedText });
+    // 인계 초안 키가 없는 녹화(4회차처럼 이 기능 전) → 아직 보낸 적 없음, '보낸다면'.
+    const { handoverDraft: _hd, ...r06Old } = r06;
+    void _hd;
+    expect(maskedCaseForInquiry("handover", r06Old, maskPii(q("Q06").text), { ok: true }).kind).toBe("would-send");
     const g16 = rec.golden.find((g) => g.id === "G16")!;
     expect(maskedCaseForQuestion(g16, maskPii(g16.question))).toMatchObject({ kind: "recorded", recordedText: g16.maskedQuestion });
     expect(maskedCaseForQuestion(null, maskPii("아무 질문")).kind).toBe("would-send");
@@ -281,11 +305,46 @@ describe("인계 카드 뷰 모델(F6)", () => {
     expect(m.patientMessage?.text).toBe(V12_MESSAGE);
   });
 
+  it("인계 초안 안내(draftNote): 보통 창구는 '의료진 확인용 — 직원은 보낼 수 없음', 공개 창구는 만들지 않음", () => {
+    const m = (id: string) => handoverCardModel(analyzeInquiry(k, q(id).channel, q(id).text).decision, item(id).handover, policies.handover, DEMO_NOW_MS, k.titles);
+    expect(m("Q06").draftNote).toBe(HANDOVER_DRAFT_NOTE.ok);
+    expect(m("Q06").draftNote).toContain("직원은 보낼 수 없고");
+    expect(m("Q16").draftNote).toBe("공개 창구라 AI 초안을 만들지 않습니다.");
+    // 모르는 창구(지도에 없음)는 규칙이 인계해도 초안을 만들지 않는다.
+    const unknown = decideRoute({ channel: "fax", text: q("Q06").text, channels: k.channels, redflag: k.redflag, medication: k.medication });
+    expect(handoverCardModel(unknown, null, policies.handover, DEMO_NOW_MS, k.titles).draftNote).toBe("창구를 몰라 AI 초안을 만들지 않습니다.");
+    // 승인 문구(V12)는 draftNote와 상관없이 그대로.
+    expect(m("Q16").patientMessage?.text).toBe(V12_MESSAGE);
+  });
+
   it("약 문의(Q25)는 MED-01", () => {
     const a = analyzeInquiry(k, q("Q25").channel, q("Q25").text);
     const m = handoverCardModel(a.decision, item("Q25").handover, policies.handover, DEMO_NOW_MS, k.titles);
     expect(m.rules.map((r) => r.id)).toEqual(["MED-01"]);
     expect(m.medTerms.length).toBeGreaterThan(0);
+  });
+});
+
+describe("인계 초안 칸(PRD v0.3) — 녹화 상태를 정직하게", () => {
+  const allowedOf = (id: string) => handoverDraftAllowed(analyzeInquiry(k, q(id).channel, q(id).text).decision);
+
+  it("공개 창구(Q16)는 칸을 그리지 않고, 녹화가 아예 없으면 '준비 전', 키가 없는 녹화(4회차)는 '녹화 전', 가짜 녹화는 녹화됨", async () => {
+    const rec = await fakeRecording();
+    expect(handoverDraftView(allowedOf("Q16"), null, true)).toEqual({ kind: "none", why: "public" });
+    expect(handoverDraftView(allowedOf("Q06"), null, false)).toEqual({ kind: "no-recording" });
+    const r06 = rec.inquiries.find((r) => r.id === "Q06")!;
+    const { handoverDraft: _hd, ...r06Old } = r06;
+    void _hd;
+    expect(handoverDraftView(allowedOf("Q06"), r06Old, true)).toEqual({ kind: "not-recorded" });
+    expect(handoverDraftView(allowedOf("Q06"), r06, true)).toEqual({ kind: "recorded", rec: r06.handoverDraft });
+  });
+
+  it("안내 글: 녹화 전·준비 전에도 안전 규칙·인계 카드·응답 시한은 동작한다고 적고, 녹화됨이면 안내 없음", () => {
+    expect(handoverDraftNotice({ kind: "not-recorded" })).toBe(
+      "이 문의의 의료진 확인용 AI 초안은 아직 미리 만들지 않았습니다(인계 초안 녹화 전). 안전 규칙·인계 카드·응답 시한과 승인 문구는 지금 동작합니다.",
+    );
+    expect(handoverDraftNotice({ kind: "no-recording" })).toContain("아직 준비 전입니다 — 안전 규칙·인계 카드·응답 시한은 지금 동작합니다");
+    expect(handoverDraftNotice({ kind: "none", why: "public" })).toBe("공개 창구라 AI 초안을 만들지 않습니다 — 공개 답글은 고정 문구만.");
   });
 });
 

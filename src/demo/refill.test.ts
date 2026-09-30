@@ -8,11 +8,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { fixedMessageQuoteIndices } from "../core/knowledge";
+import type { ClaudeClient } from "../llm/client";
 import type { DraftResult } from "../llm/draft";
 import { DEMO_AS_OF } from "./clock";
 import { recordingDrift } from "./drift";
 import { computeMetrics, evidenceChunks } from "./evaluation";
 import { buildFakeRecording } from "./fake-recording";
+import { handoverDraftFor } from "./record";
 import { parseDemoRecording, type DemoRecording } from "./recording";
 import { draftDisplay, type DraftMode } from "./refill";
 import { realBundle, realInputs, realKnowledge, ROOT } from "./__fixtures__/real";
@@ -178,5 +181,40 @@ describe("평가 탭 — 더한 행", () => {
     const none = computeMetrics(k, b.inquiries, b.golden, null);
     const row = none.find((x) => x.key === "llm-handover")!;
     expect([row.state, row.numerator]).toEqual(["needs-recording", null]);
+  });
+});
+
+describe("인계 초안의 승인 문구 따옴표 — 화면 글·보낼 글에서만 뺀다(녹화 파일은 그대로)", () => {
+  const message = k.index.rules!.handoverDraft!.fixedMessage!;
+  const live = parseDemoRecording(JSON.parse(readFileSync(join(ROOT, "data/demo-responses.json"), "utf8")) as unknown);
+  if (!live.ok) throw new Error(live.errors.join("\n"));
+  const handoverDrafts = live.value.inquiries.flatMap((r) => (r.handoverDraft ? [{ id: r.id, d: r.handoverDraft.draft }] : []));
+  const joined = (v: ReturnType<typeof draftDisplay>, d: DraftResult) => d.sentences.map((x) => (v.sentenceParts.get(x.index) ?? []).map((p) => p.text).join("")).join(" ");
+
+  it("시연 녹화의 통과한 인계 초안: 보낼 글과 문장 표시에 승인 문구를 감싼 따옴표가 없고, 그것만으로 '다시 채움' 표시가 뜨지 않는다", () => {
+    // 1차 인계 초안 녹화(2026-09-30)는 20건 모두 승인 문구와 같은 글이고 14건이 큰따옴표로 감쌌다. 다시 녹화한 뒤에도 같은 성질을 본다.
+    for (const { id, d } of handoverDrafts.filter((x) => x.d.status === "ok")) {
+      const v = draftDisplay(k, d, "reply", { unquote: message });
+      expect([id, fixedMessageQuoteIndices(v.text!, message), fixedMessageQuoteIndices(joined(v, d), message), v.refilled]).toEqual([id, [], [], false]);
+      expect(v.text!.replace(/[^\p{L}\p{N}]/gu, "")).toContain(message.replace(/[^\p{L}\p{N}]/gu, ""));
+    }
+  });
+
+  it("감싼 채 녹화된 초안(옛 finalText에 따옴표)도 화면 글·보낼 글에서는 뺀다 — 일반 답장(unquote 없음)은 그대로", async () => {
+    const create = async (p: { messages: { content: unknown }[] }) => {
+      const docs = (p.messages[0].content as { type: string; source?: { content: { text: string }[] } }[]).filter((c) => c.type === "document");
+      const fixed = docs[0].source!.content[0].text;
+      const cite = { type: "content_block_location", cited_text: fixed, document_index: 0, start_block_index: 0, end_block_index: 1 };
+      return { id: "m", type: "message", role: "assistant", model: "fake-fixture", content: [{ type: "text", text: `"${message}"`, citations: [cite] }], stop_reason: "end_turn", stop_details: null, usage: { input_tokens: 0, output_tokens: 0 } };
+    };
+    const inquiries = realInputs().inquiriesJson as { id: string; channel: string; text: string }[];
+    const hd = await handoverDraftFor({ beta: { messages: { create } } } as unknown as ClaudeClient, k, inquiries.find((q) => q.id === "Q11")!);
+    // 1차 녹화처럼 보낼 글에 따옴표가 남은 기록.
+    const old: DraftResult = { ...hd.draft, finalText: hd.draft.modelText };
+    expect(old.finalText).toBe(`"${message}"`);
+    const v = draftDisplay(k, old, "reply", { unquote: message });
+    expect([v.text, v.recordedText, v.refilled]).toEqual([message, message, false]);
+    expect(joined(v, old)).not.toMatch(/["“”]/);
+    expect(draftDisplay(k, old, "reply").text).toBe(`"${message}"`);
   });
 });

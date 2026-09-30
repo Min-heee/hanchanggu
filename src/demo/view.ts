@@ -13,17 +13,18 @@ import { maskPii, type MaskResult } from "../core/mask";
 import type { Knowledge } from "../core/knowledge";
 import { RULE_DESCRIPTION, type RuleId } from "../core/redflag";
 import { MIN_TOP_SCORE, retrieve, type PinReason, type Retrieval } from "../core/retrieve";
-import type { RouteDecision, RouteStep } from "../core/route";
+import { handoverDraftAllowed, type HandoverDraftAllowed, type RouteDecision, type RouteStep } from "../core/route";
 import { tokenize } from "../core/search";
 import { formatWon, renderPrice, type Fill } from "../core/template";
 import { linkTitlesOf, renderWikiLinks } from "../core/wikilink";
 import type { ExcludeReason } from "../core/vault";
 import type { DraftResult } from "../llm/draft";
+import { checkHandoverDraft, handoverGuardOf } from "../llm/handover-check";
 import { formatDuration, formatKst, kstDate, minutesBetween } from "./clock";
 import type { HandoverInfo } from "./inbox";
 import type { HandoverPolicy } from "./policy";
 import type { Bundle } from "./bundle";
-import type { GoldenRecord, InquiryRecord, RecordedHit, RetrievalMeta } from "./recording";
+import type { GoldenRecord, HandoverDraftRecord, InquiryRecord, RecordedHit, RetrievalMeta } from "./recording";
 
 // ─── 머리 띠 ─────────────────────────────────────────────────────────────
 
@@ -52,8 +53,8 @@ const MASK_KIND: Record<string, string> = { rrn: "주민번호", phone: "전화"
 export type MaskedCase =
   /** 미리 만든 AI 답을 만들 때 모델을 불렀다. 그때 보낸 글을 보인다. */
   | { kind: "recorded"; recordedText: string; live: MaskResult }
-  /** 규칙이 먼저 경로를 정해 모델을 부르지 않았다. */
-  | { kind: "not-sent"; why: "handover" | "public" | "shop" | "hold"; live: MaskResult }
+  /** 규칙이 먼저 경로를 정해 모델을 부르지 않았다(인계 문의는 창구 때문에 인계 초안을 만들지 않는 경우만 — 그 밖의 인계 문의는 의료진 확인용 초안을 위해 AI에 보낸다). */
+  | { kind: "not-sent"; why: "public" | "shop" | "hold" | "channel"; live: MaskResult }
   /** 이 화면에서는 모델을 부르지 않는다(직접 해 보기·자유 입력·AI 답 준비 전). */
   | { kind: "would-send"; live: MaskResult };
 
@@ -68,11 +69,11 @@ export interface MaskedView {
   compareText: string | null;
 }
 
-const NOT_SENT_WHY: Record<"handover" | "public" | "shop" | "hold", string> = {
-  handover: "안전 규칙이 먼저 잡음",
+const NOT_SENT_WHY: Record<"public" | "shop" | "hold" | "channel", string> = {
   public: "공개 창구는 고정 문구만",
   shop: "쇼핑몰 문의는 연결 창구만 안내",
   hold: "보류",
+  channel: "모르는 창구라 초안을 만들지 않음",
 };
 
 export function maskedView(c: MaskedCase): MaskedView {
@@ -113,19 +114,31 @@ export function maskedView(c: MaskedCase): MaskedView {
   };
 }
 
-/** 문의 상세에서 어느 경우인지 정한다. 모델을 불렀는지는 녹화의 분류 기록으로 안다(record.ts는 분류를 불러야 초안도 부른다). */
-export function maskedCaseForInquiry(step: RouteStep, record: InquiryRecord | null, live: MaskResult): MaskedCase {
+/**
+ * 문의 상세에서 어느 경우인지 정한다. 모델을 불렀는지는 녹화로 안다: 분류 기록이 있으면 분류 때(record.ts는 분류를 불러야 초안도 부른다),
+ * 인계 문의는 의료진 확인용 초안(handoverDraft) 기록이 있으면 그때 보낸 글이다.
+ * 인계 문의(PRD v0.3)는 공개·모르는·쇼핑몰 창구가 아니면 인계 초안을 위해 AI에 보낸다 — 녹화가 아직 없으면 '보낸다면'이다.
+ * @param draftAllowed 이 문의에 인계 초안을 붙일 수 있는지(core/route.ts handoverDraftAllowed). 인계가 아닌 경로에서는 보지 않는다.
+ */
+export function maskedCaseForInquiry(step: RouteStep, record: InquiryRecord | null, live: MaskResult, draftAllowed: HandoverDraftAllowed): MaskedCase {
   if (record && record.classification !== null) return { kind: "recorded", recordedText: record.route.maskedText, live };
-  if (step === "handover") return { kind: "not-sent", why: "handover", live };
+  if (step === "handover") {
+    if (!draftAllowed.ok) return { kind: "not-sent", why: draftAllowed.why === "not-handover" ? "hold" : draftAllowed.why, live };
+    if (record?.handoverDraft) return { kind: "recorded", recordedText: record.handoverDraft.maskedText, live };
+    return { kind: "would-send", live };
+  }
   if (step === "public-template") return { kind: "not-sent", why: "public", live };
   if (step === "shop-redirect" && record) return { kind: "not-sent", why: "shop", live };
   if (step === "hold" && record) return { kind: "not-sent", why: "hold", live };
   return { kind: "would-send", live };
 }
 
-/** 직접 해 보기: 규칙이 인계·공개 창구로 보내면 AI에 보내지 않는 경로, 아니면 '보낸다면'. 어느 쪽이든 이 화면은 AI를 부르지 않는다. */
-export function maskedCaseForTry(step: RouteStep, live: MaskResult): MaskedCase {
-  if (step === "handover") return { kind: "not-sent", why: "handover", live };
+/**
+ * 직접 해 보기: 공개 창구(또는 인계 초안을 만들지 않는 창구의 인계)면 AI에 보내지 않는 경로, 아니면 '보낸다면'.
+ * 인계 문의도 의료진 확인용 초안을 위해 AI에 보내는 경로다(PRD v0.3). 어느 쪽이든 이 화면은 AI를 부르지 않는다.
+ */
+export function maskedCaseForTry(step: RouteStep, live: MaskResult, draftAllowed: HandoverDraftAllowed): MaskedCase {
+  if (step === "handover" && !draftAllowed.ok) return { kind: "not-sent", why: draftAllowed.why === "not-handover" ? "hold" : draftAllowed.why, live };
   if (step === "public-template") return { kind: "not-sent", why: "public", live };
   return { kind: "would-send", live };
 }
@@ -461,6 +474,14 @@ export const HOLD_TEXT: Record<string, string> = {
   "price-mismatch": "가격 칸이 인용한 원문 금액과 다름",
   "ad-banned": "금지 광고 표현",
   "api-error": "모델 호출 오류",
+  "handover-no-fixed-message": "의료진이 확인 후 연락한다는 승인 문구를 통째로 쓰지 않음",
+  "handover-staff-text": "직원에게 하는 말(승인 문구 밖 문장·'직원' 문장)이 들어감",
+  "handover-medical-words": "되짚기·승인 문구 밖 문장에 약·증상 말이 들어감",
+  "handover-judgment-words": "되짚기·승인 문구 밖 문장에 판단·지시 말(괜찮다·정상·원인·…하세요 등)이 들어감",
+  "handover-recap": "되짚기 문장에 문의에 없는 말·부정 뒤집기·판단·지시·허락 말이 있거나 맨 앞 한 문장이 아님",
+  "handover-not-verbatim": "인용 문장이 원문 문장과 글자 그대로 같지 않음(바꿔 씀·말을 끼움·인용 없는 문장)",
+  "handover-link": "다른 문서 링크가 든 문장을 씀",
+  "handover-amount": "금액을 가격 칸 밖에 숫자로 씀",
 };
 
 // ─── 인계 카드(F5·F6) ─────────────────────────────────────────────────────
@@ -480,11 +501,22 @@ export interface HandoverCardModel {
   roleAtDeadline: string | null;
   deadline: null | { rule: string; until: string; overdue: string | null; remaining: string | null };
   patientMessage: null | { text: string; source: string };
+  /** 인계 초안(PRD v0.3)을 붙이는지와 누가 보내는지 한 줄. 카드 머리에 보인다. */
+  draftNote: string;
 }
 
+/** 인계 카드 머리의 인계 초안 안내(handoverCardModel.draftNote). */
+export const HANDOVER_DRAFT_NOTE: Record<"ok" | "public" | "channel" | "shop", string> = {
+  ok: "AI 초안은 의료진 확인용입니다 — 직원은 보낼 수 없고, 직원이 환자에게 보내는 것은 아래 승인 문구뿐입니다.",
+  public: "공개 창구라 AI 초안을 만들지 않습니다.",
+  channel: "창구를 몰라 AI 초안을 만들지 않습니다.",
+  shop: "쇼핑몰 창구(별도 사업자)라 AI 초안을 만들지 않습니다.",
+};
+
 /**
- * 인계 카드에 그릴 값. 환자에게 보낼 문구는 **V12 승인 문구만**이다 — 읽지 못하면 null이고, 지어내지 않는다.
- * 시한은 넘겨받은 nowMs(시연 기준 시각)로만 잰다.
+ * 인계 카드에 그릴 값. 직원이 환자에게 보낼 문구는 **V12 승인 문구만**이다 — 읽지 못하면 null이고, 지어내지 않는다.
+ * 시한은 넘겨받은 nowMs(시연 기준 시각)로만 잰다. 카드는 인계 문의에만 뜨므로, 인계 초안 안내(draftNote)는 창구로만 정한다
+ * (분류가 인계한 문의는 decision.step이 아직 classify라서 step은 보지 않는다).
  */
 export function handoverCardModel(
   decision: RouteDecision,
@@ -520,7 +552,61 @@ export function handoverCardModel(
     roleAtDeadline: info && info.overdue && info.roleAtDeadline !== info.role ? info.roleAtDeadline : null,
     deadline,
     patientMessage: patientMessageOf(policy, titles),
+    draftNote: HANDOVER_DRAFT_NOTE[handoverDraftNoteKey(handoverDraftAllowed({ step: "handover", replyMode: decision.replyMode, channel: decision.channel }))],
   };
+}
+
+function handoverDraftNoteKey(a: HandoverDraftAllowed): keyof typeof HANDOVER_DRAFT_NOTE {
+  return a.ok ? "ok" : a.why === "not-handover" ? "channel" : a.why;
+}
+
+// ─── 인계 초안(PRD v0.3) ─────────────────────────────────────────────────
+
+/**
+ * 인계 카드 안 '의료진 확인용 AI 초안' 칸에 무엇을 그릴지.
+ * - none: 이 창구에는 만들지 않음(카드 머리의 draftNote가 이유를 말한다).
+ * - no-recording: 미리 만든 AI 답이 아예 없음.
+ * - not-recorded: 녹화는 있는데 이 문의의 인계 초안이 없음(4회차처럼 이 기능 전에 녹화했거나, 일부만 녹화함) — '녹화 전'.
+ * - recorded: 녹화된 인계 초안.
+ */
+export type HandoverDraftView =
+  | { kind: "none"; why: "not-handover" | "public" | "channel" | "shop" }
+  | { kind: "no-recording" }
+  | { kind: "not-recorded" }
+  | { kind: "recorded"; rec: HandoverDraftRecord };
+
+export function handoverDraftView(allowed: HandoverDraftAllowed, record: InquiryRecord | null, hasRecording: boolean): HandoverDraftView {
+  if (!allowed.ok) return { kind: "none", why: allowed.why };
+  if (!hasRecording) return { kind: "no-recording" };
+  return record?.handoverDraft ? { kind: "recorded", rec: record.handoverDraft } : { kind: "not-recorded" };
+}
+
+/**
+ * 녹화된 인계 초안을 **지금** 볼트 값과 검사 규칙으로 다시 검사한 결과(src/llm/handover-check.ts checkHandoverDraft). 화면(인계 카드 안 초안 칸)·
+ * 녹화 뒤 바뀜 검사·평가가 이 값을 쓴다 — 녹화 때 status만 보면, 규칙을 조인 뒤에도 옛 기준으로 통과한 초안을 의료진이 보낼 수 있다(fail-closed가 아님).
+ * 녹화 때 이미 보류면 그대로. 지금 볼트에서 고정 안내 문장을 읽지 못하면 보류.
+ */
+export function recheckHandoverDraft(k: Pick<Knowledge, "index" | "medication" | "redflag">, rec: Pick<HandoverDraftRecord, "draft" | "maskedText">): DraftResult {
+  if (rec.draft.status !== "ok") return rec.draft;
+  const guard = handoverGuardOf(k, rec.maskedText);
+  if (!guard) {
+    return { ...rec.draft, status: "hold", finalText: null, holdReasons: [{ code: "handover-no-fixed-message", detail: "지금 볼트에서 고정 안내 문장(승인 문구)을 읽지 못합니다" }] };
+  }
+  return checkHandoverDraft(rec.draft, guard);
+}
+
+/** 인계 초안 칸의 안내 한 줄(녹화된 초안이 있으면 null). 화면이 이 글을 그대로 보인다. */
+export function handoverDraftNotice(v: HandoverDraftView): string | null {
+  switch (v.kind) {
+    case "none":
+      return v.why === "public" ? "공개 창구라 AI 초안을 만들지 않습니다 — 공개 답글은 고정 문구만." : v.why === "shop" ? HANDOVER_DRAFT_NOTE.shop : HANDOVER_DRAFT_NOTE.channel;
+    case "no-recording":
+      return "의료진 확인용 AI 초안은 아직 준비 전입니다 — 안전 규칙·인계 카드·응답 시한은 지금 동작합니다.";
+    case "not-recorded":
+      return "이 문의의 의료진 확인용 AI 초안은 아직 미리 만들지 않았습니다(인계 초안 녹화 전). 안전 규칙·인계 카드·응답 시한과 승인 문구는 지금 동작합니다.";
+    case "recorded":
+      return null;
+  }
 }
 
 /**

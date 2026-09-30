@@ -18,7 +18,7 @@
  */
 
 import { checkAdExpressions, type AdCheckResult } from "../core/adcheck";
-import type { Knowledge } from "../core/knowledge";
+import { fixedMessageQuoteIndices, unquoteFixedMessage, type Knowledge } from "../core/knowledge";
 import { checkPriceCitations } from "../core/pricecheck";
 import { composeOutgoing, type Fill, type OutgoingPart, type OutgoingResult } from "../core/template";
 import type { DraftResult } from "../llm/draft";
@@ -42,7 +42,7 @@ export interface DraftDisplay {
   fills: Fill[];
   /** 문장 번호 → 화면에 그릴 조각(값 칸은 fill이 있다). */
   sentenceParts: Map<number, OutgoingPart[]>;
-  /** 녹화 때 저장한 글. */
+  /** 녹화 때 저장한 글(인계 초안이면 승인 문구를 감싼 따옴표를 뺀 것). */
   recordedText: string | null;
   /** 지금 채운 글이 녹화 때 글과 다른가(화면에 "지금 코드로 다시 채움"을 적는다). */
   refilled: boolean;
@@ -53,18 +53,36 @@ export interface DraftDisplay {
   adcheck: AdCheckResult | null;
 }
 
-export function draftDisplay(k: RefillKnowledge & Pick<Knowledge, "ad">, draft: DraftResult, mode: DraftMode): DraftDisplay {
+/**
+ * @param opts.unquote 인계 초안의 승인 문구(고정 안내 문장). 주면 그 문장을 감싼 따옴표를 화면 글·보낼 글에서 뺀다(core/knowledge.ts
+ *   unquoteFixedMessage) — 1차 인계 초안 녹화 20건 중 14건이 따옴표로 감쌌다. 녹화 파일은 고치지 않고 여기서만 뺀다. 모델이 쓴 말은 그대로다.
+ */
+export function draftDisplay(k: RefillKnowledge & Pick<Knowledge, "ad">, draft: DraftResult, mode: DraftMode, opts: { unquote?: string | null } = {}): DraftDisplay {
+  const message = opts.unquote ?? null;
+  // 따옴표 자리는 모델 글 전체에서 찾는다(승인 문구가 문장 여러 개에 걸쳐 있어 문장 하나로는 찾지 못한다). 문장마다 제 자리의 따옴표만 뺀다.
+  const quotes = message ? fixedMessageQuoteIndices(draft.modelText, message) : [];
+  const stripAt = (text: string, from: number) => {
+    let out = "";
+    let prev = 0;
+    for (const i of quotes.filter((q) => q >= from && q < from + text.length).map((q) => q - from)) {
+      out += text.slice(prev, i);
+      prev = i + 1;
+    }
+    return out + text.slice(prev);
+  };
   const sentenceParts = new Map<number, OutgoingPart[]>();
   for (const s of draft.sentences) {
     // 문장 하나씩 채워도 전체를 채운 것과 같다: 단위는 같은 절 안에서만, 조사는 값 바로 뒤만 보기 때문이다.
-    const r = recompose(k, s.text, mode);
-    sentenceParts.set(s.index, r.ok ? r.parts : [{ text: s.text, fill: null }]);
+    const text = stripAt(s.text, s.start);
+    const r = recompose(k, text, mode);
+    sentenceParts.set(s.index, r.ok ? r.parts : [{ text, fill: null }]);
   }
-  const base = { sentenceParts, recordedText: draft.finalText };
+  const recordedText = draft.finalText === null ? null : unquoteFixedMessage(draft.finalText, message);
+  const base = { sentenceParts, recordedText };
   if (draft.status !== "ok") {
     return { ...base, text: null, fills: draft.fills, refilled: false, errors: [], patientLinkTitles: [], adcheck: draft.adcheck };
   }
-  const r = recompose(k, draft.modelText, mode);
+  const r = recompose(k, stripAt(draft.modelText, 0), mode);
   if (!r.ok) return { ...base, text: null, fills: [], refilled: false, errors: r.errors, patientLinkTitles: [], adcheck: draft.adcheck };
   const priceProblems = checkPriceCitations(draft.sentences, k.prices);
   if (priceProblems.length > 0) {
@@ -75,7 +93,7 @@ export function draftDisplay(k: RefillKnowledge & Pick<Knowledge, "ad">, draft: 
     ...base,
     text: r.text,
     fills: r.fills,
-    refilled: r.text !== draft.finalText,
+    refilled: r.text !== recordedText,
     errors: [],
     patientLinkTitles: titles,
     adcheck: checkAdExpressions(r.text, k.ad),

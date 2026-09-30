@@ -20,12 +20,15 @@ export interface Analysis {
   postopRead: PostopDayReading | null;
   /** 검색에 실제로 쓴 경과일: 직원이 고친 값이 있으면 그 값. */
   postopUsed: number | null;
-  /** 인계·공개 창구·보류면 검색하지 않는다(null). */
+  /** 인계·공개 창구·보류면 이 검색을 하지 않는다(null). 인계 문의의 의료진 확인용 초안은 녹화 때 인계 발췌(고정 안내·즉시 조치 문단 + 섞인 의료가 아닌 물음용 행정 안내 문단)로 따로 찾았다(core/retrieve.ts retrieveForHandover). */
   retrieval: Retrieval | null;
   excerpts: ReturnType<typeof groupHitsByDoc>;
 }
 
-/** 검색까지 가는 경로. 인계 카드·고정 문구·보류는 초안을 만들지 않으므로 검색도 하지 않는다. */
+/**
+ * 검색(①②)까지 가는 경로. 고정 문구·보류는 초안을 만들지 않으므로 검색하지 않는다. 인계 카드는 직원이 보낼 초안이 없어 이 검색 칸을 그리지 않고,
+ * 의료진 확인용 초안의 발췌는 녹화된 값을 인계 카드 안에 보인다(src/app/_components/HandoverDraft.tsx).
+ */
 const SEARCH_STEPS = new Set(["classify", "draft", "shop-redirect"]);
 
 export function analyzeInquiry(k: Knowledge, channel: string, text: string, postopOverride: number | null | undefined = undefined): Analysis {
@@ -39,7 +42,7 @@ export function analyzeInquiry(k: Knowledge, channel: string, text: string, post
 }
 
 /**
- * 사내 Q&A(F14). 직원 질문은 게이트로 막지 않는다(인계할 환자·창구가 없다). 가림은 한다.
+ * 사내 Q&A(F14). 직원 질문은 게이트로 인계하지 않는다(인계할 환자·창구가 없다). 가림은 한다.
  * 적신호·약 말이 있으면 화면이 규칙 카드를 따로 띄운다(src/demo/qa.ts staffRuleCard — 발췌 앞세우기와 같은 판정).
  */
 export function analyzeStaffQuestion(k: Knowledge, question: string) {

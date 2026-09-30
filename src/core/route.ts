@@ -22,6 +22,9 @@
  * 반대로 공개 리뷰에 샴푸 이야기가 있어도(분류가 shop) 공개 창구 규칙이 먼저다 — 공개 답글에는 V14 문구만.
  *
  * 두 번 부른다: 분류 전(llm 생략 → 초안 경로 문의는 "classify")과 후(분류 결과 또는 실패 사유 포함).
+ *
+ * 인계 카드로 간 문의에도 AI가 의료진 확인용 초안을 쓸 수 있다(2026-09-30 오너 결정, PRD v0.3). 이 결정은 경로를 바꾸지 않는다 —
+ * 게이트가 먼저 돌고 인계 판정·카드·응답 시한은 그대로이고, 초안을 붙일지만 handoverDraftAllowed가 따로 정한다.
  */
 
 import { checkMedication, type MedicationConfig, type MedicationResult } from "./medication";
@@ -173,6 +176,23 @@ export function decideRoute(input: RouteInput): RouteDecision {
   }
   trace.push(`초안 경로(분류: ${stage.value.category})`);
   return { ...base, step: "draft", holdReason: null };
+}
+
+/**
+ * 인계 문의에 의료진 확인용 AI 초안을 붙여도 되나(PRD v0.3). 경로는 바꾸지 않고 초안을 만들지만 정한다.
+ * - 공개 창구(리뷰·댓글, template-only): 공개 답글은 고정 문구만이라 만들지 않는다.
+ * - 모르는 창구: 답장 방식을 모르므로 만들지 않는다.
+ * - 쇼핑몰 창구: 별도 사업자가 운영하는 창구라 병원 문서를 인용한 답을 만들지 않는다.
+ * 초안은 직원이 보낼 수 없고 의료진이 확인해야만 보낼 수 있다(src/demo/state.ts canSend의 clinicianOnly).
+ */
+export type HandoverDraftAllowed = { ok: true } | { ok: false; why: "not-handover" | "public" | "channel" | "shop" };
+
+export function handoverDraftAllowed(d: Pick<RouteDecision, "step" | "replyMode" | "channel">): HandoverDraftAllowed {
+  if (d.step !== "handover") return { ok: false, why: "not-handover" };
+  if (!d.channel || d.replyMode === null) return { ok: false, why: "channel" };
+  if (isShopChannel(d.channel)) return { ok: false, why: "shop" };
+  if (d.replyMode === "template-only") return { ok: false, why: "public" };
+  return { ok: true };
 }
 
 export interface PublicTemplate {

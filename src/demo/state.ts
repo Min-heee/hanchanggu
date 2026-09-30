@@ -1,6 +1,6 @@
 /**
  * 방문자 브라우저에만 남는 시연 상태(localStorage 한 칸). 승인·수정·모의 발송 기록(F13), 확정 대기의
- * 연락 시도(F16), 인계 표시(F6), 직원이 고친 경과일(F17), 문서 빈칸(F14).
+ * 연락 시도(F16), 인계 표시(F6), 직원이 고친 경과일(F17), 문서 빈칸(F14), 인계 초안의 의료진 확인(PRD v0.3).
  *
  * 왜 서버에 두지 않나: 시연은 로그인도 데이터베이스도 없다(PRD 2절). 방문자마다 따로이고, '초기화'로 지운다.
  * 순수 함수로 두는 이유: 화면 컴포넌트에 기록 규칙을 쓰면 시험할 수 없다.
@@ -14,12 +14,35 @@ import { z } from "zod";
 
 export const STORAGE_KEY = "hanchanggu:demo:v1";
 
-export type LogAction = "승인" | "수정" | "모의 발송" | "인계 표시" | "인계 취소" | "연락 시도" | "경과일 수정" | "고정 문구 선택";
+export type LogAction = "승인" | "수정" | "모의 발송" | "인계 표시" | "인계 취소" | "연락 시도" | "경과일 수정" | "고정 문구 선택" | "의료진 확인";
 
-export const LOG_ACTIONS = ["승인", "수정", "모의 발송", "인계 표시", "인계 취소", "연락 시도", "경과일 수정", "고정 문구 선택"] as const satisfies readonly LogAction[];
+export const LOG_ACTIONS = [
+  "승인",
+  "수정",
+  "모의 발송",
+  "인계 표시",
+  "인계 취소",
+  "연락 시도",
+  "경과일 수정",
+  "고정 문구 선택",
+  "의료진 확인",
+] as const satisfies readonly LogAction[];
 
 /** 검토자는 이름을 치지 않고 역할을 고른다(방문자가 실명을 쳐서 브라우저에 남기지 않게). */
 export const REVIEWER_ROLES = ["CS 직원", "코디네이터", "상담실장", "간호사"] as const;
+
+/**
+ * 인계 문의의 의료진 확인용 AI 초안(PRD v0.3)을 확인해 발송을 켤 수 있는 역할. V12 '인계를 받은 의료진이나 간호사'.
+ * 직원(CS 직원·코디네이터·상담실장)은 이 초안을 보내지 않고 V12 승인 문구만 보낸다.
+ */
+export const CLINICIAN_ROLES = ["간호사", "의사"] as const;
+
+/** 인계 초안 패널의 역할 목록. 직원 역할도 두어, 직원을 고르면 확인 버튼이 꺼지는 것을 화면에서 보인다. */
+export const HANDOVER_REVIEWER_ROLES = [...REVIEWER_ROLES, "의사"] as const;
+
+export function isClinician(role: string): boolean {
+  return (CLINICIAN_ROLES as readonly string[]).includes(role);
+}
 
 export interface LogEntry {
   seq: number;
@@ -136,23 +159,36 @@ function lastSeq(log: LogEntry[], target: string, action: LogAction): LogEntry |
   return best;
 }
 
-export type SendCheck = { ok: true } | { ok: false; reason: "unsaved" | "not-approved" | "edited-after-approval" | "already-sent" };
+/** canSend의 선택. 인계 초안(clinicianOnly)이면 보내는 사람의 역할(sender)이 필수다. */
+export type SendOptions = { clinicianOnly: true; sender: string } | { clinicianOnly?: false; sender?: never };
+
+export type SendCheck =
+  | { ok: true }
+  | { ok: false; reason: "unsaved" | "not-approved" | "not-clinician-checked" | "edited-after-approval" | "already-sent" | "sender-not-clinician" };
 
 /**
  * 모의 발송 버튼을 켤지(F13). 판정 기준은 "마지막 승인이 마지막 수정보다 뒤이고, 승인한 글이 지금 보낼 글과 같은가".
  * '이 문의에 승인 기록이 한 번이라도 있는가'로 보면, 승인 → 글 수정 → 저장 뒤에도 다시 승인하지 않고 보낼 수 있다.
  * 보낸 뒤에는 다시 승인하기 전까지 같은 건을 또 보내지 못한다.
  *
+ * clinicianOnly(인계 문의의 의료진 확인용 AI 초안, PRD v0.3): 승인 기준이 '마지막 의료진 확인 기록'으로 바뀌고, 그 기록을 남긴 역할이
+ * 의료진(CLINICIAN_ROLES)이어야 한다. 직원이 누른 '승인'은 세지 않고, 마지막 '의료진 확인'이 직원 역할로 남아 있으면(저장값을 고친 경우)
+ * 막는다. 확인 뒤 수정하면 다시 막히고, 보낸 뒤 재발송이 막히는 규칙은 같다. 보내는 사람(sender, 지금 고른 역할)도 의료진이어야 한다 —
+ * 의료진이 확인한 뒤라도 직원 역할로는 보내지 못한다(직원은 V12 승인 문구만 보낸다). sender는 타입에서 필수다(SendOptions):
+ * 선택 인자로 두면 부르는 쪽이 빠뜨렸을 때 이 확인이 조용히 사라진다.
+ *
  * @param text 지금 입력칸의 글. @param saved 저장된 글(수정본이 없으면 원 초안).
  */
-export function canSend(log: LogEntry[], target: string, text: string, saved: string): SendCheck {
+export function canSend(log: LogEntry[], target: string, text: string, saved: string, opts: SendOptions = {}): SendCheck {
   if (text !== saved) return { ok: false, reason: "unsaved" };
-  const approval = lastSeq(log, target, "승인");
+  const approval = lastSeq(log, target, opts.clinicianOnly ? "의료진 확인" : "승인");
+  if (opts.clinicianOnly && (!approval || !isClinician(approval.by))) return { ok: false, reason: "not-clinician-checked" };
   if (!approval) return { ok: false, reason: "not-approved" };
   const edit = lastSeq(log, target, "수정");
   if ((edit && edit.seq > approval.seq) || approval.text !== saved) return { ok: false, reason: "edited-after-approval" };
   const sent = lastSeq(log, target, "모의 발송");
   if (sent && sent.seq > approval.seq) return { ok: false, reason: "already-sent" };
+  if (opts.clinicianOnly && !isClinician(opts.sender)) return { ok: false, reason: "sender-not-clinician" };
   return { ok: true };
 }
 

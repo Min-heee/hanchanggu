@@ -3,6 +3,8 @@
  * 기대값은 손으로 적었다 — 데이터를 고치면 사람이 다시 적는다.
  */
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { verifyCitations } from "../core/citations";
 import { MIN_TOP_SCORE, retrieve } from "../core/retrieve";
@@ -12,7 +14,7 @@ import { DEMO_NOW, DEMO_NOW_MS, formatDuration, formatKst, kstParts, kstToMs } f
 import { computeMetrics, metricValue } from "./evaluation";
 import { buildInboxItem, deadlineBadge, filterInbox, filterOptions, inboxRows, inboxSummary, KIND_LABEL, receivedRangeText, sortInbox, STATUS_LABEL, type LocalMarks } from "./inbox";
 import { confirmDeadlineMs, FALLBACK_CONFIRM_BUSINESS_DAYS, isOpenAt, readConfirmPolicy, readHandoverPolicy } from "./policy";
-import { realBundle, realKnowledge } from "./__fixtures__/real";
+import { realBundle, realKnowledge, ROOT } from "./__fixtures__/real";
 
 const k = realKnowledge();
 const bundle = realBundle();
@@ -179,10 +181,30 @@ describe("통합 목록(F3) — 녹화 없음", () => {
     expect(STATUS_LABEL["handover-needed"]).toBe("인계 필요");
   });
 
-  it("모의 발송한 건은 맨 아래로", () => {
-    const ids = items({ sent: new Set(["Q06"]), handedOver: new Map() }).map((i) => i.id);
-    expect(ids.at(-1)).toBe("Q06");
-    expect(ids[0]).toBe("Q07");
+  it("모의 발송한 건은 맨 아래로(인계가 아닌 문의)", () => {
+    const list = items({ sent: new Set(["Q02", "Q01"]), handedOver: new Map() });
+    expect(list.slice(-2).map((i) => [i.id, i.status])).toEqual([
+      ["Q01", "sent"],
+      ["Q02", "sent"],
+    ]);
+    expect(list[0].id).toBe("Q06");
+    expect(inboxRows(list, { collapseRedflag: false }).filter((r) => r.type === "title").at(-1)).toEqual({ type: "title", key: "t-sent", text: "발송함" });
+  });
+
+  it("인계 문의(Q06)는 의료진 확인용 초안을 보내도 '인계' 상태·적신호 묶음·요약·시한 경보가 그대로다(V12 '인계한 뒤', F6)", () => {
+    const sent = { sent: new Set(["Q06"]), handedOver: new Map<string, number>() };
+    const list = items(sent);
+    const q06 = list.find((i) => i.id === "Q06")!;
+    expect([q06.status, q06.group, q06.handoverDraftSent, q06.handover!.overdue]).toEqual(["handover-needed", 0, true, true]);
+    expect(list[0].id).toBe("Q06");
+    expect(inboxSummary(list)).toEqual(inboxSummary(items()));
+    expect(deadlineBadge(q06, DEMO_NOW_MS)!.tone).toBe("red");
+    // 인계함으로 표시하고 초안도 보냈어도 '인계함'이고, 의료진 연락 시한(to-contact)이 이어서 돈다.
+    const both = items({ sent: new Set(["Q06"]), handedOver: new Map([["Q06", DEMO_NOW_MS]]) }).find((i) => i.id === "Q06")!;
+    expect([both.status, both.group, both.handover!.phase, both.handoverDraftSent]).toEqual(["handed-over", 0, "to-contact", true]);
+    // 보내지 않은 인계 건과 인계가 아닌 건에는 표시가 없다.
+    expect(items().some((i) => i.handoverDraftSent)).toBe(false);
+    expect(items({ sent: new Set(["Q02"]), handedOver: new Map() }).find((i) => i.id === "Q02")!.handoverDraftSent).toBe(false);
   });
 
   it("기다린 시간은 기준 시각에서 잰다", () => {
@@ -255,8 +277,9 @@ describe("통합 목록(F3) — 녹화 없음", () => {
       nextDepositMinutes: 9 * 60,
       total: 41,
     });
-    // 발송한 건은 할 일에서 빠진다.
-    expect(inboxSummary(items({ sent: new Set(["Q06"]), handedOver: new Map() })).redflag).toBe(15);
+    // 발송한 건은 할 일에서 빠진다(인계가 아닌 건). 인계 건은 초안을 보내도 빠지지 않는다(위 시험).
+    expect(inboxSummary(items({ sent: new Set(["Q01"]), handedOver: new Map() })).deposit).toBe(3);
+    expect(inboxSummary(items({ sent: new Set(["Q06"]), handedOver: new Map() })).redflag).toBe(16);
   });
 
   it("목록 머리의 받은 기간은 데이터에서 계산한다(가장 이른 Q41 ~ 가장 늦은 Q40)", () => {
@@ -375,8 +398,27 @@ describe("평가 탭(F15) — 녹화 없음", () => {
   });
 
   it("녹화가 필요한 지표는 '녹화 전'이고 숫자를 지어내지 않는다", () => {
-    for (const key of ["hold-recall-nosource", "false-hold", "citation-mismatch", "injection"]) {
+    for (const key of ["hold-recall-nosource", "false-hold", "citation-mismatch", "injection", "handover-draft"]) {
       expect([key, m(key).state, m(key).numerator]).toEqual([key, "needs-recording", null]);
     }
+  });
+});
+
+describe("평가 탭 — 4회차 녹화(인계 초안 녹화 전)", () => {
+  // 실제 녹화 파일로 만든 번들. 4회차에는 인계 초안이 없어 그 지표만 '녹화 전'이고, 나머지 녹화 지표는 계산된다.
+  const real = (() => {
+    try {
+      return realBundle(JSON.parse(readFileSync(join(ROOT, "data/demo-responses.json"), "utf8")) as unknown, "file");
+    } catch {
+      return null;
+    }
+  })();
+  const handoverRecorded = real?.recording?.inquiries.some((r) => r.handoverDraft) ?? false;
+
+  it.skipIf(real === null || handoverRecorded)("인계 초안 지표만 needs-recording, 오보류·보류 재현율·인용 불일치는 computed", () => {
+    const ms = computeMetrics(k, real!.inquiries, real!.golden, real!.recording);
+    const m = (key: string) => ms.find((x) => x.key === key)!;
+    expect([m("handover-draft").state, m("handover-draft").numerator]).toEqual(["needs-recording", null]);
+    for (const key of ["hold-recall-nosource", "false-hold", "citation-mismatch", "llm-handover"]) expect([key, m(key).state]).toEqual([key, "computed"]);
   });
 });

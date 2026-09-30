@@ -5,6 +5,8 @@
  * 진짜 녹화와 같은 함수(record.ts의 recordAll)를 모의 클라이언트로 부른다. 그래서 가림·게이트·분류 경로·검색·
  * 인용 검증·가격 칸 채우기·광고 검사까지 진짜 코드가 돌고, 결과 모양이 scripts/record-demo.ts가 쓰는 것과 같다.
  * 모의 클라이언트의 답은 받은 문단을 글자 그대로 옮긴 문장이라 내용 품질을 보여 주지 않는다.
+ * 인계 문의의 의료진 확인용 초안(지시문이 handover 모드)에는 맨 앞 문서(고정 안내 문단)의 따옴표 안 승인 문구를 통째로 옮기고 그 문단만 인용한다 —
+ * 진짜 모델에게 시키는 모양(규칙 17)이자 인계 초안 검사(checkHandoverDraft)를 통과하는 가장 작은 모양일 뿐, 이것도 모양 확인용이다.
  * 화면은 recordingSource가 "fake-fixture"면 "시험용 가짜 녹화"라고 크게 표시한다.
  *
  *   DEMO_FAKE_RECORDING=1 npm run dev     # 가짜 녹화를 넣은 번들로 화면 보기(배포·빌드에서는 거부된다)
@@ -41,6 +43,15 @@ function message(content: unknown[]) {
 function firstSentence(text: string): string {
   return text.split(/(?<=[.?!])\s+/)[0];
 }
+
+/** 인계 초안용: 따옴표 안 문장이 있으면 그 전체(승인 문구), 없으면 문단의 첫 문장. */
+function quotedMessage(text: string): string {
+  const q = /["“]([^"”]+)["”]/.exec(text);
+  return q ? q[1].trim() : firstSentence(text);
+}
+
+/** buildSystemPrompt의 handover 모드 머리말(src/llm/draft.ts). */
+const HANDOVER_WHO = "의료진에게 인계한 환자 문의";
 
 interface DocBlock {
   type: "document";
@@ -88,7 +99,7 @@ function priceSentence(docs: DocBlock[], item: PriceItem | undefined): unknown |
 /** 요청 모양을 보고 분류 응답 또는 인용 달린 초안 응답을 돌려주는 모의 클라이언트. */
 export function fakeClient(tone: Knowledge["tone"], prices: PriceItem[] = []): ClaudeClient {
   const create = async (params: unknown) => {
-    const p = params as { output_config?: { format?: unknown }; messages: { content: unknown }[] };
+    const p = params as { output_config?: { format?: unknown }; system?: string; messages: { content: unknown }[] };
     if (p.output_config?.format) {
       const data = JSON.parse(p.messages[0].content as string) as { inquiry: string };
       return message([{ type: "text", text: JSON.stringify(fakeClassify(data.inquiry)), citations: null }]);
@@ -100,13 +111,14 @@ export function fakeClient(tone: Knowledge["tone"], prices: PriceItem[] = []): C
     const q = payload.inquiry ?? payload.question ?? "";
     if (NO_SOURCE_WORDS.some((w) => q.includes(w))) return message([{ type: "text", text: NO_EVIDENCE_MARKER, citations: null }]);
 
+    const handover = typeof p.system === "string" && p.system.includes(HANDOVER_WHO);
     const blocks: unknown[] = [{ type: "text", text: `${tone.greetings[0]}\n`, citations: null }];
-    // 앞의 두 문서에서 첫 문단의 첫 문장을 글자 그대로 옮기고 그 문단을 인용한다.
-    docs.slice(0, 2).forEach((d, di) => {
+    // 앞의 두 문서에서 첫 문단의 첫 문장을 글자 그대로 옮기고 그 문단을 인용한다. 인계 초안은 맨 앞 문서(고정 안내)의 승인 문구만.
+    docs.slice(0, handover ? 1 : 2).forEach((d, di) => {
       const cited = d.source.content[0].text;
       blocks.push({
         type: "text",
-        text: firstSentence(cited),
+        text: handover ? quotedMessage(cited) : firstSentence(cited),
         citations: [
           { type: "content_block_location", cited_text: cited, document_index: di, document_title: d.title ?? null, start_block_index: 0, end_block_index: 1 },
         ],

@@ -3,6 +3,9 @@
  *
  * 순서: 적신호 인계 → 약·분류 인계 → 예약금 확정 대기 → 나머지, 같은 묶음 안에서는 오래 기다린 순.
  * 발송(모의)까지 끝난 건은 맨 아래로 내린다 — 할 일이 남은 건이 위에 있어야 한다.
+ * 인계 문의는 예외다: 의료진 확인용 초안(PRD v0.3)을 모의 발송해도 '인계' 상태·묶음·요약·시한 경보가 그대로다. 보낸 초안은
+ * "의료진이 확인한 뒤 직접 연락드리겠습니다"를 담고 있어 연락을 약속한 것이지 마친 것이 아니다 — V12 '인계한 뒤'(의료진이 연락을 마쳤다고
+ * 알려 줄 때까지 '인계' 상태)와 F6(시한이 지나면 다시 경보). 보냈다는 사실은 따로 표시한다(InboxItem.handoverDraftSent).
  * 약·분류 인계를 확정 대기보다 위에 두는 이유: 둘 다 5분 시한의 의료진 인계다. PRD F3의 "적신호 맨 위"는 지키되,
  * 약 용량 문의가 주차·리뷰 문의 아래에 묻히면 병원 쪽에는 안전 결함으로 읽힌다.
  *
@@ -34,6 +37,9 @@ export const STATUS_LABEL: Record<InboxStatus, string> = {
   hold: "보류",
   sent: "발송",
 };
+
+/** 인계 문의에서 의료진 확인용 초안을 모의 발송한 표시(상태 배지와 따로). 의료진 연락을 마쳤다는 뜻이 아니다. */
+export const HANDOVER_DRAFT_SENT_LABEL = "인계 초안 보냄(모의) · 의료진 연락 전";
 
 export type InboxKind = "redflag" | "medication" | "llm-handover" | "deposit" | "public" | "shop" | "draft-path" | "hold";
 
@@ -84,10 +90,12 @@ export interface InboxItem {
   record: InquiryRecord | null;
   deposit: DepositInfo | null;
   handover: HandoverInfo | null;
+  /** 인계 문의의 의료진 확인용 초안을 모의 발송했는지. 상태·묶음·요약에는 쓰지 않는다(위 머리말). */
+  handoverDraftSent: boolean;
 }
 
 export interface LocalMarks {
-  /** 모의 발송까지 끝낸 문의 ID. */
+  /** 모의 발송까지 끝낸 문의 ID. 인계 문의에서는 의료진 확인용 초안을 보냈다는 뜻이고, '인계' 상태를 풀지 않는다. */
   sent: ReadonlySet<string>;
   /** 직원이 '인계함'으로 표시한 문의와 그 시각(ms). */
   handedOver: ReadonlyMap<string, number>;
@@ -150,8 +158,9 @@ function kindOf(decision: RouteDecision, step: RouteStep, deposit: boolean): Inb
 }
 
 function statusOf(id: string, step: RouteStep, record: InquiryRecord | null, marks: LocalMarks): InboxStatus {
-  if (marks.sent.has(id)) return "sent";
+  // 인계가 발송보다 먼저다: 의료진 확인용 초안을 보내도 의료진 연락이 끝난 것이 아니다(머리말).
   if (step === "handover") return marks.handedOver.has(id) ? "handed-over" : "handover-needed";
+  if (marks.sent.has(id)) return "sent";
   if (step === "hold") return "hold";
   if (step === "public-template") return marks.templateChosen?.has(id) ? "draft" : "template";
   // 쇼핑몰 안내는 초안을 만들지 않는다(연결 창구만 안내). 직원이 아직 손대지 않은 새 문의다.
@@ -199,6 +208,7 @@ export function buildInboxItem(
     record,
     deposit: pending ? depositInfo(q, k, policies.confirm, nowMs) : null,
     handover: step === "handover" ? handoverInfo(receivedMs, marks.handedOver.get(q.id) ?? null, policies.handover, k, nowMs) : null,
+    handoverDraftSent: step === "handover" && marks.sent.has(q.id),
   };
 }
 

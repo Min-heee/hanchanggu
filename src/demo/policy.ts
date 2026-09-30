@@ -7,6 +7,7 @@
  * (환자에게 나가는 문장을 코드가 지어내면 승인 문구만 보낸다는 규칙(F6)이 깨진다.)
  */
 
+import { handoverFixedChunk, handoverFixedMessage } from "../core/knowledge";
 import type { Chunk } from "../core/vault";
 import type { Hours } from "../core/template";
 import { DOW_KO, kstDate, kstParts, kstToMs } from "./clock";
@@ -58,14 +59,15 @@ export function readHandoverPolicy(chunks: Chunk[]): HandoverPolicy {
     return null;
   };
   // 환자 안내 문구는 제목이 '고정 안내 문장'인 문단의 따옴표 안만 읽는다. 다른 문단의 따옴표를 잘못 집지 않게.
-  const msgChunk = v12.find((c) => c.heading !== null && /고정\s*안내/.test(c.heading));
-  const quoted = msgChunk ? /["“]([^"”]+)["”]/.exec(msgChunk.text) : null;
+  // 인계 초안의 발췌(core/retrieve.ts retrieveForHandover)와 승인 문구 검사(src/llm/handover-check.ts checkHandoverDraft)도 같은 함수로 이 문단·문장을 고른다.
+  const msgChunk = handoverFixedChunk(v12);
+  const quoted = handoverFixedMessage(msgChunk);
   return {
     handoverMinutes: find(/(\d{1,3})\s*분\s*안에\s*인계/, (m) => Number(m[1])),
     contactMinutes: find(/(\d{1,3})\s*분\s*안에\s*환자에게\s*직접\s*연락/, (m) => Number(m[1])),
     roleOpen: find(/진료일에는\s*그날\s*(.+?)에게/, (m) => m[1].trim()),
     roleClosed: find(/진료시간\s*밖에는\s*(.+?)(?:으로|로)\s*전화/, (m) => m[1].trim()),
-    patientMessage: quoted && msgChunk ? { value: quoted[1].trim(), chunkId: msgChunk.chunkId } : null,
+    patientMessage: quoted && msgChunk ? { value: quoted, chunkId: msgChunk.chunkId } : null,
   };
 }
 

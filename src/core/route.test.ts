@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decideRoute, isShopChannel, parseChannelMap, parsePublicTemplates, type ChannelEntry, type LlmClassification } from "./route";
+import { decideRoute, handoverDraftAllowed, isShopChannel, parseChannelMap, parsePublicTemplates, type ChannelEntry, type LlmClassification } from "./route";
 import { parseMedicationConfig, type MedicationConfig } from "./medication";
 import { parseRedflagConfig, type RedflagConfig } from "./redflag";
 import { activeJson, loadVault } from "./vault";
@@ -137,5 +137,31 @@ describe("parsePublicTemplates", () => {
     expect(parsePublicTemplates([{ key: "a", text: "감사합니다." }])).toEqual({ ok: true, templates: [{ key: "a", text: "감사합니다." }] });
     expect(parsePublicTemplates([{ key: "a" }]).ok).toBe(false);
     expect(parsePublicTemplates([]).ok).toBe(false);
+  });
+});
+
+describe("handoverDraftAllowed — 인계 문의에 의료진 확인용 AI 초안을 붙일지(PRD v0.3)", () => {
+  const { channels, redflag, medication } = setup();
+  const pus = "수술 9일째인데 고름이 나와요";
+  const at = (channel: string, text = pus) => handoverDraftAllowed(decideRoute({ channel, text, channels, redflag, medication }));
+
+  it("직접(copy)·전화(callback) 창구의 인계 → 붙인다", () => {
+    expect(at("kakao")).toEqual({ ok: true });
+    expect(at("web_form")).toEqual({ ok: true });
+    expect(handoverDraftAllowed({ step: "handover", replyMode: "direct", channel: { channel: "talk", label: "talk", replyMode: "direct", note: null, operator: null } })).toEqual({ ok: true });
+  });
+
+  it("공개 창구(리뷰, template-only) → public, 모르는 창구 → channel, 쇼핑몰 창구 → shop", () => {
+    expect(at("review")).toEqual({ ok: false, why: "public" });
+    expect(at("fax")).toEqual({ ok: false, why: "channel" });
+    expect(at("shop_qna")).toEqual({ ok: false, why: "shop" });
+  });
+
+  it("인계가 아니면 붙이지 않는다 — 게이트 판정(경로)은 그대로", () => {
+    const d = decideRoute({ channel: "kakao", text: "모당 가격 알려 주세요", channels, redflag, medication });
+    expect(d.step).toBe("classify");
+    expect(handoverDraftAllowed(d)).toEqual({ ok: false, why: "not-handover" });
+    // 인계 판정 자체는 창구와 상관없이 그대로다(공개 리뷰의 증상도 인계).
+    expect(decideRoute({ channel: "review", text: pus, channels, redflag, medication }).step).toBe("handover");
   });
 });

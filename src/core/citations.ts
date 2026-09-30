@@ -118,8 +118,10 @@ export interface SentenceReport {
    * cited: 인용 있음. allowlisted: V13 인사·맺음. template: 인용은 없지만 진료시간 자리표시자({{hours}})를
    * 담은 짧은 문장 — 값이 승인 문서 json에서 들어오므로 허용한다. 가격 칸({{price:…}})은 인용 문장 안에서만 받는다
    * (어느 항목 값인지 원문과 대조해야 해서, core/pricecheck.ts). uncited: 막힌 문장.
+   * recap: 인계 초안(handover)의 맨 앞 되짚기 문장(환자가 쓴 내용을 판단 없이 되짚음). verifyCitations가 leadingRecap일 때 첫 문장에만 붙이고,
+   * 받아도 되는 되짚기인지는 인계 초안 검사(src/llm/handover-check.ts checkHandoverDraft → checkRecapSentence)가 코드로 본다.
    */
-  kind: "cited" | "allowlisted" | "template" | "uncited";
+  kind: "cited" | "allowlisted" | "template" | "uncited" | "recap";
   citations: VerifiedCitation[];
   problems: HoldCode[];
 }
@@ -348,12 +350,18 @@ function fitsTemplateFrame(sentence: string): boolean {
  * @param docs 요청에 넣은 문서들(document_index 순서).
  * @param allowedDocIds 승인된 최신 문서 ID.
  * @param tone V13 인사·맺음 허용 목록.
+ * @param opts.leadingRecap 인계 초안(src/llm/draft.ts mode "handover")만 켠다. 초안의 **첫 문장**이 인용·허용 인사·자리표시자 틀 어디에도
+ *   들지 않으면 막지 않고 kind "recap"(되짚기 후보)으로 둔다. 둘째 문장부터의 인용 없는 문장은 그대로 막는다(되짚기는 맨 앞 한 문장뿐).
+ *   되짚기 후보가 받아도 되는 문장인지(문의에 있는 말만·판단·지시 말 없음·확인 어미)는 여기서 보지 않는다 — 인계 초안 검사가 본다.
+ *   켜면 인용 없는 자리표시자 문장(template)도 받지 않는다 — 인계 초안에서 인용 없이 받는 문장은 되짚기 하나뿐이다. 틀의 주어 자리(13자)에
+ *   "바로 오시면 되는 시간은 {{hours}}입니다."처럼 내원 지시가 들어갔다(2026-09-30 적대 검증). 진료시간은 문서를 인용한 문장 안에서만 쓴다.
  */
 export function verifyCitations(
   content: ReadonlyArray<ModelTextBlock>,
   docs: SentDocument[],
   allowedDocIds: ReadonlySet<string>,
   tone: ToneConfig,
+  opts: { leadingRecap?: boolean } = {},
 ): VerifyResult {
   const reasons: HoldReason[] = [];
 
@@ -443,9 +451,11 @@ export function verifyCitations(
       }
     } else if (invalid.length === 0 && allow.has(normalizeSentence(text))) {
       kind = "allowlisted";
-    } else if (invalid.length === 0 && PLACEHOLDER_TEST.test(text) && fitsTemplateFrame(text)) {
+    } else if (invalid.length === 0 && !opts.leadingRecap && PLACEHOLDER_TEST.test(text) && fitsTemplateFrame(text)) {
       // 틀의 주어에는 숫자가 들어갈 수 없으므로 숫자 대조는 따로 하지 않는다(값은 자리표시자로만 들어온다).
       kind = "template";
+    } else if (invalid.length === 0 && opts.leadingRecap && index === 0) {
+      kind = "recap";
     } else {
       kind = "uncited";
       if (invalid.length === 0) {
@@ -453,7 +463,9 @@ export function verifyCitations(
         const why = PRICE_PLACEHOLDER.test(text)
           ? " (가격 자리표시자는 그 가격이 적힌 문서 문장을 인용한 문장 안에서만 씁니다)"
           : PLACEHOLDER_TEST.test(text)
-            ? " (자리표시자 문장이 허용 틀 '…는 {{…}}입니다'를 벗어났습니다)"
+            ? opts.leadingRecap
+              ? " (인계 초안은 인용 없는 자리표시자 문장을 받지 않습니다 — 진료시간은 문서를 인용한 문장 안에서만)"
+              : " (자리표시자 문장이 허용 틀 '…는 {{…}}입니다'를 벗어났습니다)"
             : "";
         reasons.push({ code: "uncited-sentence", sentenceIndex: index, detail: `인용 없는 문장: "${text}"${why}` });
       }

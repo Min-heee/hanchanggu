@@ -71,3 +71,28 @@ describe("시스템 지시 — 2회차 녹화 결함", () => {
     expect(p.slice(p.indexOf("15."))).not.toMatch(/\d+분/);
   });
 });
+
+describe("시스템 지시 — 인계 문의의 의료진 확인용 초안(PRD v0.3)", () => {
+  const h = buildSystemPrompt("handover", ["consult"]);
+  const tail = h.slice(h.indexOf("16. "));
+
+  it("진단·판단·용량은 쓰지 않고, 되짚기 한 문장 + 고정 안내 문장 + 섞인 의료가 아닌 물음의 문서 인용 답 + 연락·내원 절차 — 직원 절차는 인용하지 않는다", () => {
+    expect(tail).toContain("고정 안내 문장");
+    expect(tail).toContain("되짚기 문장");
+    expect(tail).toContain("의료가 아닌 물음");
+    expect(tail).toContain("연락·내원 절차 안내");
+    expect(tail).toContain("진단");
+    expect(tail).toContain("원인 추정");
+    expect(tail).toContain("용량");
+    expect(tail).toContain("따옴표로 감싸지 말고");
+    expect(tail).toContain("직원이 할 일");
+    // 규칙 4(증상 해석·진단·치료 판단 금지)는 그대로 실린다.
+    expect(h).toContain("4. 증상 해석, 진단, 치료 판단, 약 용량·중단·병용, 효과 보장은 쓰지 마세요.");
+  });
+
+  it("분 단위 시한·119·금액을 지시문에 박지 않는다 — 문서가 바뀌면 초안도 바뀌게", () => {
+    expect(tail).not.toMatch(/\d+분/);
+    expect(tail).not.toContain("119");
+    expect(tail).not.toMatch(/\d{1,3},\d{3}원/);
+  });
+});

@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { addGap, addLog, canSend, changedSentences, EMPTY_STATE, parseState, sentTargets, splitSentences, type LogEntry } from "./state";
+import {
+  addGap,
+  addLog,
+  canSend,
+  changedSentences,
+  CLINICIAN_ROLES,
+  EMPTY_STATE,
+  HANDOVER_REVIEWER_ROLES,
+  parseState,
+  REVIEWER_ROLES,
+  sentTargets,
+  splitSentences,
+  type LogEntry,
+} from "./state";
 
 describe("시연 상태(localStorage)", () => {
   it("깨진 값·다른 모양은 빈 상태로 시작한다", () => {
@@ -115,5 +128,81 @@ describe("모의 발송을 켤지(canSend)", () => {
   it("다른 문의의 승인은 상관없다", () => {
     const s = addLog(EMPTY_STATE, { target: "Q03", action: "승인", by: "CS 직원", at: "t", detail: "", text: draft });
     expect(canSend(s.log, T, draft, draft).ok).toBe(false);
+  });
+});
+
+describe("의료진 확인 전에는 인계 초안을 보낼 수 없다(canSend clinicianOnly, PRD v0.3)", () => {
+  const T = "Q06";
+  const draft = "보내 주신 내용은 의료진에게 바로 전달했습니다. 의료진이 확인한 뒤 직접 연락드리겠습니다.";
+  const edited = `${draft} 이식 부위는 만지거나 긁지 않습니다.`;
+  // 보내는 사람(sender)은 타입에서 필수다(SendOptions). 여기서는 의료진으로 두고, 보내는 사람 확인은 아래 따로 본다.
+  const only = { clinicianOnly: true, sender: "간호사" } as const;
+  const log = (s: ReturnType<typeof addLog>, action: LogEntry["action"], by: string, text?: string) =>
+    addLog(s, { target: T, action, by, at: "t", detail: "", ...(text !== undefined ? { text } : {}) });
+
+  it("기록이 없으면 못 보낸다", () => {
+    expect(canSend(EMPTY_STATE.log, T, draft, draft, only)).toEqual({ ok: false, reason: "not-clinician-checked" });
+  });
+
+  it("직원이 누른 '승인'은 세지 않는다 — 직원 역할 셋 모두", () => {
+    for (const by of ["CS 직원", "코디네이터", "상담실장"]) {
+      const s = log(EMPTY_STATE, "승인", by, draft);
+      expect([by, canSend(s.log, T, draft, draft, only)]).toEqual([by, { ok: false, reason: "not-clinician-checked" }]);
+    }
+  });
+
+  it("직원 역할로 남은 '의료진 확인'(저장값을 고쳐 역할을 위조)은 막는다 — 앞선 의료진 확인이 있어도 마지막 확인 기준", () => {
+    expect(canSend(log(EMPTY_STATE, "의료진 확인", "CS 직원", draft).log, T, draft, draft, only)).toEqual({ ok: false, reason: "not-clinician-checked" });
+    const s = log(log(EMPTY_STATE, "의료진 확인", "간호사", draft), "의료진 확인", "코디네이터", draft);
+    expect(canSend(s.log, T, draft, draft, only)).toEqual({ ok: false, reason: "not-clinician-checked" });
+  });
+
+  it("간호사·의사가 확인하면 보낼 수 있다", () => {
+    for (const by of CLINICIAN_ROLES) expect([by, canSend(log(EMPTY_STATE, "의료진 확인", by, draft).log, T, draft, draft, only)]).toEqual([by, { ok: true }]);
+  });
+
+  it("확인 뒤 수정하면 다시 막히고, 다시 확인하면 보낸다", () => {
+    let s = log(EMPTY_STATE, "의료진 확인", "의사", draft);
+    s = log(s, "수정", "CS 직원");
+    expect(canSend(s.log, T, edited, edited, only)).toEqual({ ok: false, reason: "edited-after-approval" });
+    // 확인한 글과 저장된 글이 다르면(기록 없이 바뀐 경우)도 막는다.
+    expect(canSend(log(EMPTY_STATE, "의료진 확인", "의사", draft).log, T, edited, edited, only)).toEqual({ ok: false, reason: "edited-after-approval" });
+    s = log(s, "의료진 확인", "간호사", edited);
+    expect(canSend(s.log, T, edited, edited, only)).toEqual({ ok: true });
+  });
+
+  it("보낸 뒤에는 의료진이 다시 확인하기 전까지 또 보내지 못한다", () => {
+    let s = log(EMPTY_STATE, "의료진 확인", "간호사", draft);
+    s = log(s, "모의 발송", "간호사", draft);
+    expect(canSend(s.log, T, draft, draft, only)).toEqual({ ok: false, reason: "already-sent" });
+  });
+
+  it("저장하지 않은 글은 못 보낸다", () => {
+    expect(canSend(log(EMPTY_STATE, "의료진 확인", "간호사", draft).log, T, edited, draft, only)).toEqual({ ok: false, reason: "unsaved" });
+  });
+
+  it("의료진이 확인한 뒤라도 직원 역할로는 보내지 못한다 — 보내는 사람도 의료진", () => {
+    const s = log(EMPTY_STATE, "의료진 확인", "간호사", draft);
+    for (const sender of ["CS 직원", "코디네이터", "상담실장"]) {
+      expect([sender, canSend(s.log, T, draft, draft, { clinicianOnly: true, sender })]).toEqual([sender, { ok: false, reason: "sender-not-clinician" }]);
+    }
+    for (const sender of CLINICIAN_ROLES) expect(canSend(s.log, T, draft, draft, { clinicianOnly: true, sender })).toEqual({ ok: true });
+    // 확인 전이면 보내는 사람과 상관없이 '의료진 확인 전'이 먼저다.
+    expect(canSend(EMPTY_STATE.log, T, draft, draft, { clinicianOnly: true, sender: "의사" })).toEqual({ ok: false, reason: "not-clinician-checked" });
+    // 빈 역할·모르는 역할도 의료진이 아니다(sender를 빠뜨리는 호출은 타입이 막는다).
+    for (const sender of ["", "원장님"]) expect(canSend(s.log, T, draft, draft, { clinicianOnly: true, sender })).toEqual({ ok: false, reason: "sender-not-clinician" });
+  });
+
+  it("clinicianOnly 없이 부르면 기존 규칙 그대로 — '의료진 확인'만으로는 직원 초안이 켜지지 않는다", () => {
+    const s = log(EMPTY_STATE, "의료진 확인", "간호사", draft);
+    expect(canSend(s.log, T, draft, draft)).toEqual({ ok: false, reason: "not-approved" });
+    expect(canSend(log(EMPTY_STATE, "승인", "CS 직원", draft).log, T, draft, draft)).toEqual({ ok: true });
+  });
+
+  it("'의료진 확인' 기록은 저장값 읽기에서 살아남고, 역할 목록은 직원 목록 + 의사", () => {
+    const s = log(EMPTY_STATE, "의료진 확인", "의사", draft);
+    expect(parseState(JSON.stringify(s)).log).toEqual(s.log);
+    expect(HANDOVER_REVIEWER_ROLES).toEqual([...REVIEWER_ROLES, "의사"]);
+    expect(REVIEWER_ROLES).not.toContain("의사");
   });
 });

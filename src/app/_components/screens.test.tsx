@@ -8,11 +8,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { readHandoverPolicy } from "@/demo/policy";
-import { bundle, engine } from "../_lib/data";
+import { bundle, engine, inquiryRecord } from "../_lib/data";
 import { Inbox } from "./Inbox";
 import { InquiryDetail } from "./InquiryDetail";
 
 const V12 = readHandoverPolicy(engine().k.chunks).patientMessage!.value;
+/** 녹화에 인계 문의의 의료진 확인용 초안(PRD v0.3)이 들어 있나. 4회차 녹화에는 없다 — 녹화 뒤에도 시험이 깨지지 않게 양쪽으로 둔다. */
+const handoverRecorded = bundle.recording?.inquiries.some((r) => r.handoverDraft) ?? false;
 
 function quotes(html: string): string[] {
   return [...html.matchAll(/<p class="quote"[^>]*>([^<]*)<\/p>/g)].map((m) => m[1]);
@@ -53,13 +55,27 @@ describe("통합 목록 첫 화면", () => {
 });
 
 describe("문의 상세", () => {
-  it("인계 카드에는 V12 승인 문구만 — 원문 인용과 함께 찍히는 글은 가린 원문과 V12 둘뿐", () => {
+  // 인계 초안 녹화 전(지금 4회차 녹화): 인계 카드에 '녹화 전'을 정직하게 보이고, 발송 패널은 없다.
+  it.skipIf(handoverRecorded)("인계 카드(Q06, 인계 초안 녹화 전): V12 승인 문구 + '녹화 전' 배지, 발송 패널 없음, 'AI에 보낸다면'", () => {
     const html = renderToStaticMarkup(<InquiryDetail id="Q06" />);
     const qs = quotes(html);
     expect(qs).toContain(V12);
     expect(qs).toHaveLength(2);
-    expect(html).toContain("AI에 보내지 않음 — 안전 규칙이 먼저 잡음");
+    expect(html).toContain("의료진 확인용 AI 초안");
+    expect(html).toContain("녹화 전");
+    expect(html).toContain("인계 초안 녹화 전");
+    expect(html).not.toContain("<textarea");
+    expect(html).toContain("AI에 보낸다면");
     expect(html).not.toContain("AI가 받은 글");
+    expect(html).not.toContain("AI 답장 초안을 만들지 않습니다");
+  });
+
+  it("공개 창구 인계(Q16): 초안 칸 없이 '공개 창구라 AI 초안을 만들지 않습니다', AI에 보내지 않음", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q16" />);
+    expect(html).toContain("공개 창구라 AI 초안을 만들지 않습니다");
+    expect(html).not.toContain("의료진 확인용 AI 초안");
+    expect(html).toContain("AI에 보내지 않음 — 공개 창구는 고정 문구만");
+    expect(quotes(html)).toContain(V12);
   });
 
   it("주민번호가 든 문의(Q17)는 원문 인용도 가린 글이 기본이고, 원문 보기에서도 주민번호는 가린다", () => {
@@ -88,6 +104,35 @@ describe("문의 상세", () => {
     expect(html).toContain("가격 칸 미리보기");
     expect(html).toContain("2,000원/모");
     expect(html).toContain("AI 초안은 아직 준비 전입니다");
+  });
+});
+
+// 인계 초안이 녹화된 뒤(record-demo --handover-only): 의료진 확인용 초안이 붙고, 첫 화면(시연 기록 없음)에서는 발송이 꺼져 있다.
+describe.skipIf(!handoverRecorded)("인계 초안이 녹화됐을 때(PRD v0.3)", () => {
+  it("Q06: '의료진 확인용 AI 초안'·'직원 발송 불가', 초안 상태에 따라 발송 패널(꺼진 채) 또는 보류 안내", () => {
+    const html = renderToStaticMarkup(<InquiryDetail id="Q06" />);
+    expect(html).toContain("의료진 확인용 AI 초안");
+    expect(html).toContain("직원 발송 불가");
+    expect(quotes(html)).toContain(V12);
+    expect(html).not.toMatch(/<button[^>]*>승인<\/button>/);
+    // 초안 상태를 먼저 단언한다 — 조건 없이 건너뛰면 보류 녹화에서 발송 패널 시험이 조용히 사라진다.
+    const status = inquiryRecord("Q06")!.handoverDraft!.draft.status;
+    if (status === "ok") {
+      expect(html).toContain("<textarea");
+      expect(html).toContain("의료진이 확인하기 전에는 보낼 수 없습니다");
+      expect(html).toMatch(/<button[^>]*disabled[^>]*>의료진 확인\(모의\)<\/button>/);
+      // 1차 인계 초안 녹화의 Q06은 승인 문구를 큰따옴표로 감쌌다. 보낼 글과 초안 문장 표시에는 따옴표가 없어야 한다(변이 C5).
+      const textarea = /<textarea[^>]*>([^<]*)<\/textarea>/.exec(html)?.[1] ?? "";
+      expect(textarea).not.toMatch(/&quot;|“|”/);
+      const section = html.slice(html.indexOf('aria-label="의료진 확인용 AI 초안"'));
+      const sentences = [...section.matchAll(/<p class="sentence[^"]*">(.*?)<\/p>/g)].map((m) => m[1].replace(/<[^>]+>/g, ""));
+      expect(sentences.length).toBeGreaterThan(0);
+      expect(sentences.join(" ")).not.toMatch(/&quot;|“|”/);
+    } else {
+      expect(status).toBe("hold");
+      expect(html).not.toContain("<textarea");
+      expect(html).toContain("AI 초안이 검증에서 보류됐습니다");
+    }
   });
 });
 

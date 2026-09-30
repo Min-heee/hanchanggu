@@ -3,6 +3,7 @@
 /**
  * 문의 상세. 위에서 아래로: 원문(가린 글이 기본) → 이 문의의 핵심 카드(확정 대기 / 인계 카드 / 고정 문구 / 보류) →
  * 경과일 → ①문서 찾기 ②발췌 ③AI 초안 ④근거·확인 → 승인·모의 발송.
+ * 인계 문의는 ①~④ 대신 인계 카드 안에 의료진 확인용 AI 초안(PRD v0.3)을 붙인다 — 직원 승인 패널이 아니라 의료진 확인 패널이다.
  * 핵심 카드를 원문 바로 아래에 두는 이유: 가격·예약금·리뷰 문의에서 경과일 편집 카드가 먼저 나오면 할 일이 밀린다.
  *
  * 판단은 src/demo(inbox·view·analyze)의 순수 함수가 한다. 시각은 DEMO_NOW_MS 하나만 쓴다.
@@ -11,10 +12,11 @@
 import Link from "next/link";
 import { useState } from "react";
 import { checkAdExpressions } from "@/core/adcheck";
+import { handoverDraftAllowed } from "@/core/route";
 import type { Fill } from "@/core/template";
 import { analyzeInquiry } from "@/demo/analyze";
 import { DEMO_NOW_MS, formatDuration, formatKst } from "@/demo/clock";
-import { buildInboxItem } from "@/demo/inbox";
+import { buildInboxItem, HANDOVER_DRAFT_SENT_LABEL } from "@/demo/inbox";
 import { draftDisplay } from "@/demo/refill";
 import { addLog, sentTargets, templateChosenTargets } from "@/demo/state";
 import {
@@ -24,6 +26,7 @@ import {
   draftSourceLabel,
   fillSourceChunk,
   handoverCardModel,
+  handoverDraftView,
   liveExcerpts,
   maskedCaseForInquiry,
   maskedView,
@@ -41,6 +44,7 @@ import { useDemoState } from "../_lib/useDemoState";
 import { ActionLog, ApprovePanel, TemplatePicker } from "./Approve";
 import { ChannelBadge, KindBadge, REPLY_MODE_LABEL, StatusBadge } from "./Badges";
 import { HandoverCard } from "./HandoverCard";
+import { HandoverDraftSection } from "./HandoverDraft";
 import { MaskedText } from "./MaskedText";
 import { AdSignals, DraftPanel, ExcerptPanel, PricePreviewCard, RetrievalPanel, VerifyPanel } from "./Pipeline";
 
@@ -77,7 +81,9 @@ export function InquiryDetail({ id }: { id: string }) {
   // 보낼 글은 녹화의 모델 글을 지금 코드로 다시 채운 것이다(src/demo/refill.ts). 화면이 녹화 때 글과 다르면 그렇다고 적는다.
   const display = draft ? draftDisplay(k, draft, "reply") : null;
   const drift = driftFor(id);
-  const masked = maskedView(maskedCaseForInquiry(item.step, record, a.decision.mask));
+  // 분류가 인계한 문의는 지금 규칙 결정(a.decision)이 아직 classify라서, 목록과 같은 경로(item.step)로 판정한다.
+  const draftAllowed = handoverDraftAllowed({ ...a.decision, step: item.step });
+  const masked = maskedView(maskedCaseForInquiry(item.step, record, a.decision.mask, draftAllowed));
 
   const cite = (ids: string[]) => {
     setHighlight(new Set(ids));
@@ -113,6 +119,7 @@ export function InquiryDetail({ id }: { id: string }) {
           <ChannelBadge channel={q.channel} />
           <KindBadge kind={item.kind} />
           <StatusBadge status={item.status} />
+          {item.handoverDraftSent && <span className="badge gray">{HANDOVER_DRAFT_SENT_LABEL}</span>}
           {drift.length > 0 && <span className="badge orange">AI 답 이후 바뀜</span>}
         </div>
         <dl className="kv" style={{ marginTop: 8 }}>
@@ -199,6 +206,7 @@ export function InquiryDetail({ id }: { id: string }) {
             </p>
           )}
           {record?.classification?.status === "classified" && <p className="small muted">AI 분류 이유: {record.classification.classification.reason}</p>}
+          <HandoverDraftSection id={id} view={handoverDraftView(draftAllowed, record, bundle.recording !== null)} replyMode={a.decision.replyMode} />
           <ActionLog target={id} title="이 문의 기록" />
         </HandoverCard>
       )}

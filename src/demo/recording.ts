@@ -41,6 +41,30 @@ export interface RetrievalMeta {
   weak: boolean;
 }
 
+/**
+ * 인계 문의의 의료진 확인용 초안(2026-09-30 오너 결정, PRD v0.3). **직원이 보내는 초안(InquiryRecord.draft)과 따로 둔다** —
+ * 직원 승인 패널·목록 상태·오보류·보류 재현율·인용 불일치 지표는 draft만 읽으므로, 이 초안은 데이터 구조상 직원 발송 경로로 새지 않는다.
+ * 화면은 의료진 확인 기록이 있어야 이 초안의 발송 버튼을 켠다(src/demo/state.ts canSend의 clinicianOnly).
+ */
+export interface HandoverDraftRecord {
+  /** 모델에 보낸 글(개인정보를 가린 문의). */
+  maskedText: string;
+  /** 인계 발췌(core/retrieve.ts retrieveForHandover). 첫 줄이 고정 안내 문단, 둘째 줄이 적신호 기준의 즉시 조치 문단이고, 그 뒤에 행정 안내 문단(최대 2)·수술 후 즉시 조치 문단이 온다(1차 녹화는 행정 안내 문단 전). */
+  retrieval: RecordedHit[];
+  retrievalMeta: RetrievalMeta;
+  draft: DraftResult;
+}
+
+/** 인계 초안만 따로 녹화해 기존 녹화 파일에 합친 기록(scripts/record-demo.ts --handover-only). 여러 번 합치면 사용량을 더한다. */
+export interface HandoverRun {
+  /** 마지막으로 합친 시각. */
+  generatedAt: string;
+  requestedModel: string;
+  servedModels: string[];
+  /** 인계 초안 녹화에 쓴 토큰(합친 모든 회차의 합). 최상위 totalUsage(전체 녹화)와 따로 센다. */
+  totalUsage: { input_tokens: number; output_tokens: number };
+}
+
 export interface InquiryRecord {
   id: string;
   route: { step: RouteStep; trace: string[]; holdReason: string | null; maskedText: string; ruleIds: string[] };
@@ -51,6 +75,11 @@ export interface InquiryRecord {
   retrievalMeta?: RetrievalMeta | null;
   excludedMatches: { docId: string; reason: string }[] | null;
   draft: DraftResult | null;
+  /**
+   * 의료진 확인용 인계 초안. 키가 없음(undefined) = 이 기능 전에 녹화했거나(4회차) 아직 합치지 않음 → 화면은 '녹화 전'.
+   * null = 만들지 않음(인계가 아니거나, 공개·모르는·쇼핑몰 창구).
+   */
+  handoverDraft?: HandoverDraftRecord | null;
 }
 
 export interface GoldenRecord {
@@ -75,6 +104,8 @@ export interface DemoRecording {
   totalUsage: { input_tokens: number; output_tokens: number };
   inquiries: InquiryRecord[];
   golden: GoldenRecord[];
+  /** 인계 초안만 따로 녹화해 합쳤으면 그 기록. 전체 녹화(인계 초안 포함)에는 없다. */
+  handoverRun?: HandoverRun;
 }
 
 const Retrieval = z.array(
@@ -85,7 +116,8 @@ const Retrieval = z.array(
     postopBoost: z.boolean().optional(),
   }),
 );
-const RetrievalMetaSchema = z.strictObject({ expandedWith: z.array(z.string()), topScore: z.number(), weak: z.boolean() }).nullable().optional();
+const RetrievalMetaObject = z.strictObject({ expandedWith: z.array(z.string()), topScore: z.number(), weak: z.boolean() });
+const RetrievalMetaSchema = RetrievalMetaObject.nullable().optional();
 const Excluded = z.array(z.strictObject({ docId: z.string(), reason: z.string() }));
 
 const Citation = z.strictObject({ docId: z.string(), chunkIds: z.array(z.string()), citedText: z.string() });
@@ -101,7 +133,7 @@ export const DraftSchema = z.strictObject({
       text: z.string(),
       start: z.number(),
       end: z.number(),
-      kind: z.enum(["cited", "allowlisted", "template", "uncited"]),
+      kind: z.enum(["cited", "allowlisted", "template", "uncited", "recap"]),
       citations: z.array(Citation),
       problems: z.array(z.string()),
     }),
@@ -126,6 +158,9 @@ export const DraftSchema = z.strictObject({
   meta: z.strictObject({ model: z.string().nullable(), servedByFallback: z.boolean(), stopReason: z.string().nullable(), usage: z.unknown() }),
 });
 
+const HandoverDraftSchema = z.strictObject({ maskedText: z.string(), retrieval: Retrieval, retrievalMeta: RetrievalMetaObject, draft: DraftSchema });
+const Usage = z.strictObject({ input_tokens: z.number(), output_tokens: z.number() });
+
 const ClassificationSchema = z.union([
   z.strictObject({
     status: z.literal("classified"),
@@ -146,7 +181,7 @@ export const DemoRecordingSchema = z.strictObject({
   servedModels: z.array(z.string()),
   vaultAsOf: z.string(),
   generatedAt: z.string(),
-  totalUsage: z.strictObject({ input_tokens: z.number(), output_tokens: z.number() }),
+  totalUsage: Usage,
   inquiries: z.array(
     z.strictObject({
       id: z.string(),
@@ -163,7 +198,15 @@ export const DemoRecordingSchema = z.strictObject({
       retrievalMeta: RetrievalMetaSchema,
       excludedMatches: Excluded.nullable(),
       draft: DraftSchema.nullable(),
-    }),
+      handoverDraft: HandoverDraftSchema.nullable().optional(),
+    })
+      // 의료진 확인용 초안이 있는 기록은 인계 경로이고 직원이 보낼 초안(draft)이 없어야 한다. 녹화 뒤 볼트 규칙이 바뀐 채
+      // --handover-only로 합치면 한 기록에 두 초안이 함께 생길 수 있다 — 드리프트 경고가 아니라 파일 모양 오류로 멈춘다.
+      .superRefine((r, ctx) => {
+        if (r.handoverDraft == null) return;
+        if (r.route.step !== "handover") ctx.addIssue({ code: "custom", path: ["handoverDraft"], message: `의료진 확인용 초안은 인계 경로에만 있어야 합니다(지금 ${r.route.step})` });
+        if (r.draft !== null) ctx.addIssue({ code: "custom", path: ["handoverDraft"], message: "의료진 확인용 초안이 있는 기록에 직원이 보낼 초안(draft)이 함께 있습니다" });
+      }),
   ),
   golden: z.array(
     z.strictObject({
@@ -176,6 +219,7 @@ export const DemoRecordingSchema = z.strictObject({
       draft: DraftSchema,
     }),
   ),
+  handoverRun: z.strictObject({ generatedAt: z.string(), requestedModel: z.string(), servedModels: z.array(z.string()), totalUsage: Usage }).optional(),
 });
 
 // 컴파일 때 확인 ①: 쓰는 쪽 타입(DemoRecording)의 값은 모두 스키마 입력으로 들어갈 수 있어야 한다(스키마가 좁으면 멈춤).
@@ -188,6 +232,8 @@ export const _sameKeysRecording: SameKeys<DemoRecording, Out> = true;
 export const _sameKeysInquiry: SameKeys<InquiryRecord, Out["inquiries"][number]> = true;
 export const _sameKeysRoute: SameKeys<InquiryRecord["route"], Out["inquiries"][number]["route"]> = true;
 export const _sameKeysGolden: SameKeys<GoldenRecord, Out["golden"][number]> = true;
+export const _sameKeysHandoverDraft: SameKeys<HandoverDraftRecord, NonNullable<Out["inquiries"][number]["handoverDraft"]>> = true;
+export const _sameKeysHandoverRun: SameKeys<HandoverRun, NonNullable<Out["handoverRun"]>> = true;
 export const _sameKeysDraft: SameKeys<DraftResult, z.output<typeof DraftSchema>> = true;
 export const _sameKeysSentence: SameKeys<DraftResult["sentences"][number], z.output<typeof DraftSchema>["sentences"][number]> = true;
 
