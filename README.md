@@ -8,8 +8,8 @@
 
 | ① 통합 목록 | ② 답장 초안과 근거 | ③ 의료진 인계 카드 |
 |---|---|---|
-| [<img src="docs/screens/1-list.png" width="260" alt="통합 목록 화면">](docs/screens/1-list.png) | [<img src="docs/screens/2-draft.png" width="260" alt="가격 문의의 답장 초안과 근거 화면">](docs/screens/2-draft.png) | [<img src="docs/screens/3-handover.png" width="260" alt="의료진 인계 카드 화면">](docs/screens/3-handover.png) |
-| 창구와 상관없이 급한 순서로 | 문장마다 근거 번호, 금액은 가격표 값 | "수술 9일째 고름" 문의. 걸린 규칙·담당·응답 시한 |
+| [<img src="docs/screens/1-list.png" width="260" alt="통합 목록 화면">](docs/screens/1-list.png) | [<img src="docs/screens/2-draft.png" width="260" alt="가격 문의의 답장 초안과 근거 화면">](docs/screens/2-draft.png) | [<img src="docs/screens/3-handover.png" width="260" alt="의료진 인계 카드와 의료진 확인용 AI 초안 화면">](docs/screens/3-handover.png) |
+| 창구와 상관없이 급한 순서로 | 문장마다 근거 번호, 금액은 가격표 값 | "수술 9일째 고름" 문의. 인계 카드와 의료진 확인용 AI 초안(직원은 못 보냄) |
 
 ## 기능
 
