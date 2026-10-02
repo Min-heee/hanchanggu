@@ -62,7 +62,7 @@ Node `^20.19 || ^22.13 || >=24`. API 키 없이 돌아갑니다([AI 답 녹화 �
 - [docs/DETAILS.md](docs/DETAILS.md) — 사용 흐름, 처리 경로, 한계 세부, AI와 사람이 나눈 일 등
 - [docs/PRD.md](docs/PRD.md) — 요구사항과 설계 결정
 - [data/README.md](data/README.md) — 합성 데이터 규칙과 검수할 곳
-- 같은 가상 의원용 도구: [다시봄](https://github.com/Min-heee/dasibom)(수술 뒤 연락), [같은각도](https://github.com/Min-heee/same-angle)(경과 사진)
+- 같은 가상 의원용 도구: [빈자리](https://github.com/Min-heee/binjari)(전화 예약 빈 시간), [다시봄](https://github.com/Min-heee/dasibom)(수술 뒤 연락), [같은각도](https://github.com/Min-heee/same-angle)(경과 사진)
 
 ## 기술 스택
 
